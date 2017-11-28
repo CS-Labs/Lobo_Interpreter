@@ -175,15 +175,16 @@ apply p          = parse (do {space; p})
 ----------------------------------------------------------------------
 
 
-data Sexpr = Symbol String | MyInt Int | MyDouble Double | Nil | Cons Sexpr Sexpr
+data Sexpr = Symbol String | SexprInt Int | SexprDouble Double | Nil | Cons Sexpr Sexpr
 
 
 instance Show Sexpr where
     show (Symbol x) = x
-    show (MyInt x) = show x
-    show (MyDouble x) = show x
+    show (SexprInt x) = show x
+    show (SexprDouble x) = show x
     show Nil = "()"
     show (Cons x y) = "(" ++ show x ++ showCdr y ++ ")"
+
 
 showCdr :: Sexpr -> String
 showCdr Nil = ""
@@ -196,9 +197,6 @@ intNum = (do
   num <- many1 ((sat isDigit))
   return (read num :: Int))
 
--- doubNum = (do 
---   num <- many1 ((sat isDigit) +++ (sat (== '.')))
---   return (read num :: Double)) 
 
 doubNum = (do
   x <- many1 (sat isDigit)
@@ -218,26 +216,28 @@ myDigit = do
 
 symbolic = myDigit +++ first
 
---parseString = do char '"'
-
--- isOther x = x `elem` [' ']
--- other = sat isOther
 
 ah = alphanum +++ (sat isSpace)
 
-quote = do
-  x <- symb "\""
-  y <- (many ah)
-  z <- symb "\""
-  return (x ++ y ++ z)
+-- quote = do
+--   x <- symb "\""
+--   y <- (many ah)
+--   z <- symb "\""
+--   return (x ++ y ++ z)
 
+-- We do not want quotes inside the Symbols
+quote = do
+  symb "\""
+  x <- (many ah)
+  symb "\""
+  return x
 
 symbol = (do
   x <- first
   y <- token (many symbolic)
   return (x:y)) +++ quote
 
-a = (do {s <- symbol; return $ Symbol s}) +++ (do {n <- doubNum; return $ MyDouble n}) +++ (do {n <- intNum; return $ MyInt n})-- +++ (do {symb "\""; s <- test; symb "\""; return $ Symbol s})
+a = (do {s <- symbol; return $ Symbol s}) +++ (do {n <- doubNum; return $ SexprDouble n}) +++ (do {n <- intNum; return $ SexprInt n})-- +++ (do {symb "\""; s <- test; symb "\""; return $ Symbol s})
 
 s = (do {symb "("  +++ symb "\'("; symb ")"; return Nil}) +++ 
     a +++ 
@@ -253,99 +253,49 @@ e = (do {symb "(" +++ symb "\'("; x <- (token e); symb ")"; y <- (token e); retu
 p str = let result = parse s str in if (length result) == 0 then Symbol "Parse Failed" else fst $ head $ result
 
 
---Need to construct a dict at compile time of line numbers to Byte codes where each
---byte code corresponds to a single line. Then there is also an enviroment/symbol table
---(below) that holds variable values as interprete the program. 
--- Byte code push and then byte code for each operation, only operations are mapped to line numbers. 
-
---data Bytecode = Halt | Refer {var :: Sexpr, next :: Bytecode} | Constant {val :: Sexpr, next :: Bytecode} | Close {args' :: [Sexpr], body' :: Bytecode, next :: Bytecode} | Test {conseq :: Bytecode, alt :: Bytecode} | Assign {var :: Sexpr, next :: Bytecode} | Frame {return :: Bytecode, next :: Bytecode} | Argument {next :: Bytecode} | Apply | Return deriving Eq
+data ByteCode = Push {getVal :: Value, getLineNum :: Int} | Print {getLineNum :: Int} | Return {getLineNum :: Int} deriving (Show)
 
 
+data Value = ValueInt Int
+           | ValueDouble Double
+           | ValueString String
+           | ValueList [Value] 
 
-data Bytecode = Push {getVal :: Value} | Print {getLine :: Int} | Return {getLine :: Int}
+instance Show Value where
+  show (ValueInt n) = show n
+  show (ValueDouble d) = show d
+  show (ValueString s) = s
+  show (ValueList l) = show l
 
-data Value = MmyInt Int
-           | MmDouble Double
-           | MyStr String
-           | List [Value] deriving (Show)
 
 newtype Env = Env {getEnv :: [(String, Value)]} deriving (Show)
 
-newtype JumpTable = JumpTable {getJumpTable :: [(Int, Bytecode)]}
-
+newtype Frame = Frame {getFrame :: [Value]} deriving (Show)
 
 updateEnv v@(str, val) oldEnv = if str `elem` [s1 | (s1,v1) <- oldEnv] 
   then  Env (map (\(s,v) -> if s == str then (s, val) else (s,v)) oldEnv)
   else  Env ([v] ++ oldEnv)
 
 
-compile :: Sexpr -> [ByteCode] -> JumpTable -> [ByteCode] -> JumpTable
--- Add something to skip the define foo.. etc.
-compile (Cons (Number n) (Cons (Symbol "print") (Cons Symbol s) (Cons sexpr Nil))) ByteCodes jTable = 
-  let byte = (Push (MyStr s)) in compile sexpr (ByteCodes ++ [byte, (Print n)]])  ([(n,byte)] ++ jTable)
+compile :: Sexpr -> [ByteCode] -> [ByteCode]
+compile (Cons (Symbol "define") (Cons (Symbol s) sexpr)) bcodes = compile sexpr bcodes
+compile (Nil) bcodes = bcodes
+compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (Symbol s) sexpr))) bcodes = 
+  compile sexpr (bcodes ++ [(Push (ValueString s) n), (Print n)])
+compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (SexprInt i) sexpr))) bcodes = 
+  compile sexpr (bcodes ++ [(Push (ValueInt i) n), (Print n)])
+compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (SexprDouble d) sexpr))) bcodes = 
+  compile sexpr (bcodes ++ [(Push (ValueDouble d) n), (Print n)])
 
 
-type Frame = Frame {getFrame :: [Value]}
-
+push :: Value -> [Value] -> [Value]
 push val frame = [val] ++ frame
 
---vm :: [ByteCode] -> IO
-vm ((Push val):rest) frame = let updatedFrame = (push val frame) in (vm rest updatedFrame)
-vm ((Print n):rest) frame = do myPrint frame; vm rest (Frame [])
+vm :: [ByteCode] -> [Value] -> IO ()
+vm [] _ = putStr ""
+vm ((Push val n):rest) frame = let updatedFrame = (push val frame) in (vm rest updatedFrame)
+vm ((Print n):rest) frame = do {myPrint frame; vm rest []}
 
 
-myPrint frame = putStr (fst frame)
+myPrint frame = putStrLn (show (head frame))
 
-
-
-
--- compile (Cons (Number n) (Cons sexpr Nil))  nextByteCode = sexpr (compileHelper n sexpr)
--- compileHelper n (Cons (Symbol "print") (Cons Symbol s) (Cons sexpr Nil)) = Push (MyStr s)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-run = compile (parse s str)
-
--- Possibly remove internally stored quotes in Sexprand add them to the Show**
