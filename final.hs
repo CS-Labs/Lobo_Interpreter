@@ -219,18 +219,12 @@ symbolic = myDigit +++ first
 
 ah = alphanum +++ (sat isSpace)
 
--- quote = do
---   x <- symb "\""
---   y <- (many ah)
---   z <- symb "\""
---   return (x ++ y ++ z)
-
--- We do not want quotes inside the Symbols
 quote = do
-  symb "\""
-  x <- (many ah)
-  symb "\""
-  return x
+  x <- symb "\""
+  y <- (many ah)
+  z <- symb "\""
+  return (x ++ y ++ z)
+
 
 symbol = (do
   x <- first
@@ -253,7 +247,14 @@ e = (do {symb "(" +++ symb "\'("; x <- (token e); symb ")"; y <- (token e); retu
 p str = let result = parse s str in if (length result) == 0 then Symbol "Parse Failed" else fst $ head $ result
 
 
-data ByteCode = Push {getVal :: Value, getLineNum :: Int} | Print {getLineNum :: Int} | Return {getLineNum :: Int} deriving (Show)
+data ByteCode = Push {getVal :: Value, getLineNum :: Int}
+              | Print {getLineNum :: Int} 
+              | Let {getLineNum :: Int}
+              | Return {getLineNum :: Int} 
+              | Add {getLineNum :: Int}
+              | Sub {getLineNum :: Int} 
+              | Mult {getLineNum :: Int}
+              | Div {getLineNum :: Int} deriving (Show)
 
 
 data Value = ValueInt Int
@@ -280,8 +281,8 @@ updateEnv v@(str, val) oldEnv = if str `elem` [s1 | (s1,v1) <- oldEnv]
 compile :: Sexpr -> [ByteCode] -> [ByteCode]
 compile (Cons (Symbol "define") (Cons (Symbol s) sexpr)) bcodes = compile sexpr bcodes
 compile (Nil) bcodes = bcodes
-compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (Symbol s) sexpr))) bcodes = 
-  compile sexpr (bcodes ++ [(Push (ValueString s) n), (Print n)])
+compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (Symbol ('"' : s)) sexpr))) bcodes = 
+  compile sexpr (bcodes ++ [(Push (ValueString (filter (/= '"') s)) n), (Print n)])
 compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (SexprInt i) sexpr))) bcodes = 
   compile sexpr (bcodes ++ [(Push (ValueInt i) n), (Print n)])
 compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (SexprDouble d) sexpr))) bcodes = 
