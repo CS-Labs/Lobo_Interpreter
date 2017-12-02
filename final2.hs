@@ -180,6 +180,7 @@ apply p          = parse (do {space; p})
 data Sexpr = Symbol String | SexprInt Int | SexprDouble Double | Nil | Cons Sexpr Sexpr
 
 
+
 instance Show Sexpr where
     show (Symbol x) = x
     show (SexprInt x) = show x
@@ -249,137 +250,118 @@ e = (do {symb "(" +++ symb "\'("; x <- (token e); symb ")"; y <- (token e); retu
 p str = let result = parse s str in if (length result) == 0 then Symbol "Parse Failed" else fst $ head $ result
 
 
--- data ByteCode = Push {getVal :: Value, getLineNum :: Int}
---               | Print {getLineNum :: Int} 
---               | Let {getLineNum :: Int}
---               | Return {getLineNum :: Int} 
---               | Add {getLineNum :: Int}
---               | Sub {getLineNum :: Int} 
---               | Mult {getLineNum :: Int}
---               | Div {getLineNum :: Int} deriving (Show)
+-- <input> := <subroutines> <instructions>
+-- <subroutines> := <subroutine> <subroutines> | ""
+-- <subroutine> := to <symbol> <variable list> [<instructions>]
+-- <variable list> := () | ( <variables> )
+-- <variables> := <variable> | <variable> , <variables>
+-- <instruction> := <0-arity command>
+-- <instruction> := <1-arity command> <value>
+-- <instruction> := if <boolean> <action> | if <boolean> <action> else <action>
+-- <boolean> := <value> = <value> | <value> < <value> | <value> > <value>
+-- <action> := <instruction> | [ <instructions> ]
+-- <instructions> := <instruction> <instructions> | "
+-- <instruction> := repeat <value> <action>
+-- <instruction> := make <symbol> <value>
+-- <value list> := () | ( <values> )
+-- <values> := <value> | <value> , <values>
+-- <instruction> := <symbol> <value list>
+-- <value> := <E> + <value> | <E> - <value> | <E>
+-- <E> := <F> * <E> | <F> / <E> | <F>
+-- <F> := <atom> | (<value>)
+-- <atom> := <symbol> | <number>
+-- <0-arity command> := penup | pendown | stop | push | pop
+-- <1-arity command> := forward | backward | left | right | color
+
+data Expression = Mul Data Data
+                | Div Data Data
+                | Add Data Data
+                | Sub Data Data
+                | GT Data Data
+                | LT Data Data
+                | EQ Data Data
+                | LTE Data Data
+                | GTE Data Data deriving (Show)
+
+data Data = AInt Int | ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Variable (String, Data) deriving (Show)
+
+data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
+
+data Instruction = Penup 
+                 | Pendown 
+                 | Stop 
+                 | Push 
+                 | Pop 
+                 | Forward Expression  
+                 | Backward Expression
+                 | Left Expression 
+                 | Right Expression
+                 | Color Expression 
+                 | Repeat Expression [Instruction] -- Action
+                 | Make String Data
+                 | Call String [Expression]-- Call Subroutine
+                 | If Data [Instruction] -- Action
+                 | IfElse Data [Instruction] [Instruction] deriving (Show) -- Action Action
+
+data Subroutine = Subroutine String [String] [Instruction] -- Name [Variable Names] [Instruction stream]
+newtype JumpTable = JumpTable {getJumpTable :: [(String, Subroutine)]} -- (String, Subroutine)
 
 
-data ByteCode = Val {getVal :: Value}
+-- (define starfish
+-- '((to starfish (side angle inc)
+--     (repeat 90
+--       (forward side)
+--       (right angle)
+--       (make angle (+ angle inc))
+--     )
+--   )
+--   (penup)
+--   (forward 50)
+--   (pendown)
+--   (starfish 30 2 20)
+-- ))
 
-data Value = ValueInt Int
-           | ValueDouble Double
-           | ValueString String
-           | ValueList [Value] 
+-- Resulting data type construction:
+-- We start by creating an instance of the subroutine data type which is triggered by the 'to' key word.
+-- When the subroutine function is called the variables passed in are bound to the strings used inside
+-- of the subroutine. 
+-- Our subroutine results as:
+-- Subroutine starfish :: String [side :: String, angle :: String, inc :: String] 
+-- [Repeat [90 :: Expression] [Forward side :: String, Right angle :: String, Make angle :: String (Add angle :: String inc :: String)]]]
+-- Add Subroutine to jump table with (starfish, subroutine)
+-- Main Instruction stream:
+-- [Penup, forward 50 :: expression, pendown, Call starfish :: string 30 :: Expression 2 :: Expression 20 Expression]
 
-instance Show Value where
-  show (ValueInt n) = show n
-  show (ValueDouble d) = show d
-  show (ValueString s) = s
-  show (ValueList l) = show l
+-- Now send the jump table and the main instruction stream to the interpreter
+-- The interpeter iterates through the main instruction stream
+-- It first hits Penup and calls the Penup function
+-- It now hits the forward instruction and calls the appropriate function.
+-- It how its the pendown instruction and calls the Pendown function.
+-- Now it hits the call instruction. From the call instruction we get the subroutine from the jump table
+-- corresponding to the name in the call instruction. Then we call a function that takes a sub expression and it's parameters.
+-- When that function is called it binds the variables in the subroutines data type (side, angle and inc) to the parameters (30, 2, 20)
+-- When binding the variables it adds it to an instance of the Local enviroment data type which will save the local enviroment
+-- corresponding to this subroutine CALL. After that we recusivly call the same function that took our main instruction stream
+-- and send it the instruction stream of the subroutine, the same jump table, and the local enviroment. 
 
 
-newtype Lines = Lines {getCode :: [(Int, Sexpr)]} deriving (Show)
-
-newtype Env = Env {getEnv :: [(String, Value)]} deriving (Show)
-
-newtype Frame = Frame {getFrame :: [Value]} deriving (Show)
-
-updateEnv v@(str, val) oldEnv = if str `elem` [s1 | (s1,v1) <- oldEnv] 
-  then  Env (map (\(s,v) -> if s == str then (s, val) else (s,v)) oldEnv)
-  else  Env ([v] ++ oldEnv)
-
--- getFromEnv key env = snd (head (filter (\x -> (fst x) == key)))
+-- Convert the s-expression to a stream of instructions and a Jump table of subroutines. 
+--preprocessor :: Sexpr -> JumpTable -> [Instruction] -> JumpTable
 
 
--- preprocess :: Sexpr -> Sexpr
--- preprocess (Cons (Symbol "define") (Cons (Symbol s) (Cons sexpr))) = sexpr
+-- We take the jump table constructed by the s-expression -> instruction translation, the main instruction stream
+-- and a local enviroment (empty for initial main instruction stream call)
+--interpeter :: JumpTable -> [Instruction] -> LocalEnv -> JumpTable -> [Instruction] -> LocalEnv
 
--- compile :: Sexpr -> [ByteCode] -> [ByteCode]
--- compile (Cons (Symbol "define") (Cons (Symbol s) sexpr)) bcodes = compile sexpr bcodes
--- compile (Nil sexpr) bcodes = sexpr bcodes
--- compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (Symbol ('"' : s)) sexpr))) bcodes = 
---   compile sexpr (bcodes ++ [(Push (ValueString (filter (/= '"') s)) n), (Print n)])
--- compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (SexprInt i) sexpr))) bcodes = 
---   compile sexpr (bcodes ++ [(Push (ValueInt i) n), (Print n)])
--- compile (Cons (SexprInt n) (Cons (Symbol "print") (Cons (SexprDouble d) sexpr))) bcodes = 
---   compile sexpr (bcodes ++ [(Push (ValueDouble d) n), (Print n)])
--- compile _ bcodes = bcodes
-
--- For everything non-string. 
--- letExpHelper var sexpr 
 
 stripHeader :: Sexpr -> Sexpr
 stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
 
--- flatten :: Sexpr -> [Sexpr] -> [Sexpr]
--- flatten (Cons (Cons l r) b = b ++ [l,r]
 
---getLine :: [Lines] -> Int -> Sexpr
-getLineSexpr lines n = snd (head (filter (\x -> (fst x) == n) lines))
-
---mapCode :: Sexpr -> Lines -> Lines
-mapCode (Cons (Cons (SexprInt n) (Cons (Symbol "print") (Cons (sexpr) Nil))) rest) lines = 
-  mapCode rest (lines ++ [(n, (Cons (Symbol "print") (Cons (sexpr) Nil)))])
-mapCode Nil lines = lines
-
-
-
-compilePrintByteCode :: Sexpr -> [ByteCode] -> [ByteCode]
-compilePrintByteCode Nil bcodes = bcodes 
-compilePrintByteCode (Cons (Symbol sym@('"':s))) bcodes = bcodes ++ [Val sym]
-compilePrintByteCode (Cons (Symbol s)) bcodes =
-compilePrintByteCode (Cons (SexprInt i1) (Cons (Symbol '+') (Cons (SexprInt i2) rest))) = bcodes ++ [Val ((read (show i1)) + (read (show i2)))]
-compilePrintByteCode (Cons (SexprInt i1))
-
--- Converts to post fix: val ++ bcodes, or bcodes ++ op. 
-
--- valueToSexpr :: Value -> Sexpr
--- valueToSexpr (ValueInt n) = SexprInt n
--- valueToSexpr (ValueDouble d) = SexprDouble d
--- valueToSexpr (ValueString s) = Symbol s
-
--- resolve :: Symbol -> Env -> (Symbol, Env)
--- resolve (Symbol ('"' : s)) _ = (Symbol ('"' : s)) -- A string, no need to resolve. 
--- resolve (Symbol s) env = (Symbol (valueToSexpr (getFromEnv (show s) env)))
-
--- resolvePrintSymbols :: Str -> Str
--- resolvePrintSymbols (Cons sexpr)
--- resolvePrintSymbols (Cons (Symbol s)) resolvedSexpr = 
--- resolvePrintSymbols sexpr = sexpr
-
-
-
--- readStrQuote :: String -> String -> (String, String)
--- readStrQuote ('"':[]) acc = (acc, [])
--- readStrQuote ('"':xs) acc = (acc, xs)
--- readStrQuote (x:xs) acc = readStrQuote xs (acc ++ [x])
-
--- readExp :: String -> String -> (String, String)
--- readExp (x:xs) 
-
-
--- resolvePrintStr :: String -> String -> String
--- resolvePrintStr ('"':xs) result = let (quotedStr, xsUpdated) = (readStrQuote xs "") in resolvePrintStr xsUpdated (result ++ quotedStr)
--- resolvePrintStr [] result = result
-
---resolvePrintStr ("(":xs) result = let 
-
--- unwrapExprExec :: String
--- unwrapExprExec val = either (const []) id val
-
--- First resolve symbols in print statement
--- Then preprocess arithmatic using haskell interp.
--- Each step literially rebuild the sexpr.
---resolveSymbol 
--- printPreProcess :: Sexpr -> Sexpr
--- printPreProcess (Cons (Symbol s) rest) = (Cons (Symbol s) rest) 
--- printPreProcess (Cons (Cons ))
-
---preprocess
-
--- push :: Value -> [Value] -> [Value]
--- push val frame = [val] ++ frame
-
--- vm :: [ByteCode] -> [Value] -> IO ()
--- vm [] _ = putStr ""
--- vm ((Push val n):rest) frame = let updatedFrame = (push val frame) in (vm rest updatedFrame)
--- vm ((Print n):rest) frame = do {myPrint frame; vm rest []}
-
-
--- myPrint frame = putStrLn (show (head frame))
-
+-- Main 
+-- 1. Read in the file and pass it to the parser p.
+-- 2. Parser p returns an s-expression
+-- 3. Send the s-expression to the preprocessor and get the main instruction stream and the jump table.
+-- 4. Send the main instruction stream, the jump table, and an empty env to the interpeter which will go on to run the program
+-- and call instructions in the main instruction stream will result in a recurisve call to the intepreter using the
+-- instruction stream corresponding to the called function in the jump table.
