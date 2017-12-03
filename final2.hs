@@ -26,6 +26,7 @@ module Parselib
     symb, ident, nat, int, token, apply, parse, space, integer, natural) where
 
 import Data.Char
+import Data.Fixed
 import Control.Monad
 import Control.Applicative hiding (many)
 import Prelude hiding (reverse)
@@ -252,7 +253,7 @@ data Plumber = Plumber Point GLfloat
 data Box = Box GLfloat GLfloat GLfloat GLfloat deriving Show
 
 
-type ColorTriple = (Int, Int, Int)
+type ColorTriple = (GLfloat, GLfloat, GLfloat)
 
 red   = (1, 0, 0)
 green = (0, 1, 0)
@@ -437,7 +438,7 @@ data Expression = Mul Data Data
                 | LTE Data Data
                 | GTE Data Data deriving (Show)
 
-data Data = AGLfloat {getval :: GLfloat} | AInt Int| ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
+data Data = AGLfloat {getval :: GLfloat} | AInt {getintval :: Int} | ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
 
 data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
 
@@ -464,6 +465,16 @@ data Instruction = Penup
 data Subroutine = Subroutine String [String] [Instruction] -- Name [Variable Names] [Instruction stream]
 newtype JumpTable = JumpTable {getJumpTable :: [(String, Subroutine)]} -- (String, Subroutine)
 
+hueToRGB :: Float -> ColorTriple
+hueToRGB hue = let x = (1 - (abs $ ((hue / 60) `mod'` 2) - 1)) in 
+    if (hue >= 0 && hue < 60) then (getval (AGLfloat 1),getval (AGLfloat x),getval (AGLfloat 0)) else if
+      (hue >= 60 && hue < 120) then (getval (AGLfloat x),getval (AGLfloat 1),getval (AGLfloat 0)) else if 
+        (hue >= 120 && hue < 180) then (getval (AGLfloat 0),getval (AGLfloat 1),getval (AGLfloat x)) else if 
+          (hue >= 180 && hue < 240) then (getval (AGLfloat 0),getval (AGLfloat x),getval (AGLfloat 1)) else if 
+            (hue >= 240 && hue < 300) then (getval (AGLfloat x),getval (AGLfloat 0),getval (AGLfloat 1)) else 
+              (getval (AGLfloat 1),getval (AGLfloat 0),getval (AGLfloat x))
+
+
 
 stripHeader :: Sexpr -> Sexpr
 stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
@@ -489,21 +500,23 @@ getGraphicInstStream (c,s,graphicInstStream) = graphicInstStream
 
 graphicsTranslator :: [Instruction] -> GraphicsState -> GraphicsState
 graphicsTranslator [] gs = gs
+graphicsTranslator ((MyColor val):rest) (c,s,g) = graphicsTranslator rest (hueToRGB (fromIntegral (getintval val)),s,g)
 graphicsTranslator (Penup:rest) (c,s,g) = graphicsTranslator rest (c,"up",g)
 graphicsTranslator (Pendown:rest) (c,s,g) = graphicsTranslator rest (c,"down",g)
-graphicsTranslator ((Forward val):rest) (c,s,g) = let gnew = g ++ [if s == "down" then Straight (getval val) else Invisible (getval val)] in graphicsTranslator rest (c,s,gnew)
-graphicsTranslator ((Backward val):rest) (c,s,g) = let gnew = g ++ [if s == "down" then Straight (-(getval val)) else Invisible (-(getval val))] in graphicsTranslator rest (c,s,gnew)
-graphicsTranslator ((MyRight val):rest) (c,s,g) = let gnew = g ++ [Bend (-(getval val))] in graphicsTranslator rest (c,s,gnew)
-graphicsTranslator ((MyLeft val):rest) (c,s,g) = let gnew = g ++ [Bend (getval val)] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((Forward val):rest) (c,s,g) = let gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((Backward val):rest) (c,s,g) = let gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((MyRight val):rest) (c,s,g) = let gnew = g ++ [Paint c $ Bend (-(getval val))] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((MyLeft val):rest) (c,s,g) = let gnew = g ++ [Paint c $ Bend (getval val)] in graphicsTranslator rest (c,s,gnew)
 graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,g) = let (_,_,gnew) = (graphicsTranslator inst (c,s,[])) in graphicsTranslator rest (c,s,(concat (replicate i gnew)))
 
 
 
 --testString = "(define foo '((forward 50) (right 90) (forward 25) (right 90) (forward 30)))"
 --testString = "(define foo '((forward 50) (left 90) (forward 25) (left 90) (forward 30)))"
---testString = "(define foo '((forward 50) (right 90) (backward 25) (right 90) (forward 30)))"
-testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
---testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
+-- testString = "(define foo '((forward 50) (right 90) (backward 25) (right 90) (forward 30)))"
+testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
+-- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
+-- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
 
 debugGetInstStream = (preprocessor (stripHeader $ p testString) [])
 debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down", []))))
@@ -512,11 +525,8 @@ debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTransl
 main = do
   (progname, _) <- getArgsAndInitialize
   createWindow "Haskell Plumbing Graphics"
-
   graphicInstStream <- newIORef ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down", []))))
-
   displayCallback $= display graphicInstStream
-
   actionOnWindowClose $= MainLoopReturns
   mainLoop
 
