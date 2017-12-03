@@ -194,37 +194,16 @@ main = do
 
   counter <- newIORef 1
 
-  let timer = addTimerCallback 1000 $ do {modifyIORef counter increment; postRedisplay Nothing; timer}
-
   displayCallback $= display counter
 
-  addTimerCallback 1000 timer
-
+  actionOnWindowClose $= MainLoopReturns
   mainLoop
 
 display counter = do
   clear [ColorBuffer]
 
   n <- readIORef counter
-
---  draw $ polygon n
-
---  draw $ Paint red $ monkey n
-
-  draw $ Paint green $ repeat' 3 $ Join (koch 60 n) (Bend 120)
-
---  draw $ Paint green $ repeat' 2 $ Join (koch 85 4) (Bend 180)
-
-  draw $ Paint blue $ gosper n
-
---  draw $ Paint green $ starfish' 2 20
-
---  draw $ stars 144
-
-  draw $ Paint red $ sierpinski n
-
---  draw $ Paint red $ marroquin 31
-
---  draw wow
-
+--  draw $ join [Straight 2, Bend 90, Straight 1, Bend 90, Straight 2]
+  draw $ repeat' 5 (join [Invisible 5.0, Straight 5.0,Invisible 5.0])
+  --draw $ join [Straight 1, Bend 90, Straight 2] 
   flush
