@@ -27,8 +27,6 @@ module Parselib
 import Data.Char
 import Control.Monad
 import Control.Applicative hiding (many)
-import Data.List.Split
-import Language.Haskell.Interpreter
 
 infixr 5 +++
 
@@ -283,7 +281,7 @@ data Expression = Mul Data Data
                 | LTE Data Data
                 | GTE Data Data deriving (Show)
 
-data Data = AInt Int | ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Variable (String, Data) deriving (Show)
+data Data = AInt Int | ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
 
 data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
 
@@ -292,11 +290,11 @@ data Instruction = Penup
                  | Stop 
                  | Push 
                  | Pop 
-                 | Forward Expression  
-                 | Backward Expression
-                 | Left Expression 
-                 | Right Expression
-                 | Color Expression 
+                 | Forward Data  
+                 | Backward Data
+                 | MyLeft Data 
+                 | MyRight Data
+                 | Color Data 
                  | Repeat Expression [Instruction] -- Action
                  | Make String Data
                  | Call String [Expression]-- Call Subroutine
@@ -320,6 +318,25 @@ newtype JumpTable = JumpTable {getJumpTable :: [(String, Subroutine)]} -- (Strin
 --   (pendown)
 --   (starfish 30 2 20)
 -- ))
+
+stripHeader :: Sexpr -> Sexpr
+stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
+
+
+preprocessor :: Sexpr -> [Instruction] -> [Instruction]
+preprocessor (Nil) instStream = instStream
+preprocessor (Cons (Cons (Symbol "penup") Nil) rest) instStream = preprocessor rest (instStream ++ [Penup])
+preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) instStream = preprocessor rest (instStream ++ [Pendown])
+preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [Forward (AInt i)])
+preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [Forward (Var var)])
+preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [Backward (AInt i)])
+preprocessor (Cons (Cons (Symbol "backward") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [Backward (Var var)])
+preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyRight (AInt i)])
+preprocessor (Cons (Cons (Symbol "right") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyRight (Var var)])
+preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (AInt i)])
+preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (Var var)])
+preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [Color (AInt i)])
+
 
 -- Resulting data type construction:
 -- We start by creating an instance of the subroutine data type which is triggered by the 'to' key word.
@@ -354,8 +371,6 @@ newtype JumpTable = JumpTable {getJumpTable :: [(String, Subroutine)]} -- (Strin
 --interpeter :: JumpTable -> [Instruction] -> LocalEnv -> JumpTable -> [Instruction] -> LocalEnv
 
 
-stripHeader :: Sexpr -> Sexpr
-stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
 
 
 -- Main 
