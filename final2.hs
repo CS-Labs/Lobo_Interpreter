@@ -170,24 +170,8 @@ token p          = do {a <- p; space; return a}
 apply           :: Parser a -> String -> [(a,String)]
 apply p          = parse (do {space; p})
 
--- Example parser for arithmetic expressions: ------------------------
---
--- expr  :: Parser Int
--- addop :: Parser (Int -> Int -> Int)
--- mulop :: Parser (Int -> Int -> Int)
---
--- expr   = term   `chainl1` addop
--- term   = factor `chainl1` mulop
--- factor = token digit +++ do {symb "("; n <- expr; symb ")"; return n}
---
--- addop  = do {symb "+"; return (+)} +++ do {symb "-"; return (-)}
--- mulop  = do {symb "*"; return (*)} +++ do {symb "/"; return (div)}
---
-----------------------------------------------------------------------
-
 
 data Sexpr = Symbol String | SexprInt Int | SexprDouble Double | Nil | Cons Sexpr Sexpr
-
 
 
 instance Show Sexpr where
@@ -257,8 +241,6 @@ e = (do {symb "(" +++ symb "\'("; x <- (token e); symb ")"; y <- (token e); retu
 
 
 p str = let result = parse s str in if (length result) == 0 then Symbol "Parse Failed" else fst $ head $ result
-
-
 
 
 type Point = (GLfloat, GLfloat)
@@ -445,36 +427,6 @@ increment n = if n == 5 then 1 else n + 1
 --increment n = if n == 36 then 1 else n + 1
 
 
-
-
-
-
-
-
-
--- <input> := <subroutines> <instructions>
--- <subroutines> := <subroutine> <subroutines> | ""
--- <subroutine> := to <symbol> <variable list> [<instructions>]
--- <variable list> := () | ( <variables> )
--- <variables> := <variable> | <variable> , <variables>
--- <instruction> := <0-arity command>
--- <instruction> := <1-arity command> <value>
--- <instruction> := if <boolean> <action> | if <boolean> <action> else <action>
--- <boolean> := <value> = <value> | <value> < <value> | <value> > <value>
--- <action> := <instruction> | [ <instructions> ]
--- <instructions> := <instruction> <instructions> | "
--- <instruction> := repeat <value> <action>
--- <instruction> := make <symbol> <value>
--- <value list> := () | ( <values> )
--- <values> := <value> | <value> , <values>
--- <instruction> := <symbol> <value list>
--- <value> := <E> + <value> | <E> - <value> | <E>
--- <E> := <F> * <E> | <F> / <E> | <F>
--- <F> := <atom> | (<value>)
--- <atom> := <symbol> | <number>
--- <0-arity command> := penup | pendown | stop | push | pop
--- <1-arity command> := forward | backward | left | right | color
-
 data Expression = Mul Data Data
                 | Div Data Data
                 | Add Data Data
@@ -488,6 +440,10 @@ data Expression = Mul Data Data
 data Data = AGLfloat {getval :: GLfloat} | AInt Int| ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
 
 data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
+
+type PenState = String
+
+type GraphicsState =  (ColorTriple, PenState, [Graphic])
 
 data Instruction = Penup 
                  | Pendown 
@@ -509,20 +465,6 @@ data Subroutine = Subroutine String [String] [Instruction] -- Name [Variable Nam
 newtype JumpTable = JumpTable {getJumpTable :: [(String, Subroutine)]} -- (String, Subroutine)
 
 
--- (define starfish
--- '((to starfish (side angle inc)
---     (repeat 90
---       (forward side)
---       (right angle)
---       (make angle (+ angle inc))
---     )
---   )
---   (penup)
---   (forward 50)
---   (pendown)
---   (starfish 30 2 20)
--- ))
-
 stripHeader :: Sexpr -> Sexpr
 stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
 
@@ -542,23 +484,6 @@ preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) instStre
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyColor (AInt i)])
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) instStream = preprocessor rest (instStream ++ [MyRepeat (AInt i) (preprocessor sexpr [])])
 
-type PenState = String
-
--- preprocessor :: Sexpr -> (ColorTriple,PenState,[Graphic]) -> (ColorTriple,PenState,[Graphic])
--- preprocessor (Nil) (c,s,graphicInstStream) = (c,s, (graphicInstStream))
--- preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (c,s,graphicInstStream)= preprocessor rest (c,"up",graphicInstStream)
--- preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (c,s,graphicInstStream) = preprocessor rest (c,"down",graphicInstStream)
--- preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = 
---   preprocessor rest (c,s,(graphicInstStream ++ [if s == "down" then Straight (fromIntegral i) else Invisible (fromIntegral i)]))
--- preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = 
---   preprocessor rest (c,s,(graphicInstStream ++ [if s == "down" then Straight (fromIntegral (-i)) else Invisible (fromIntegral (-i))]))
--- preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = preprocessor rest (c,s,(graphicInstStream ++ [Bend (fromIntegral (-i))]))
--- preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = preprocessor rest (c,s,(graphicInstStream ++ [Bend (fromIntegral i)]))
--- preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (c,s,graphicInstStream) = 
---   let (_, _, repeatInst) = (preprocessor sexpr (c,s,[])) in  preprocessor rest (c,s, (graphicInstStream ++ (concat (replicate i repeatInst))))
-
-type GraphicsState =  (ColorTriple, PenState, [Graphic])
-
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,graphicInstStream) = graphicInstStream
 
@@ -573,58 +498,6 @@ graphicsTranslator ((MyLeft val):rest) (c,s,g) = let gnew = g ++ [Bend (getval v
 graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,g) = let (_,_,gnew) = (graphicsTranslator inst (c,s,[])) in graphicsTranslator rest (c,s,(concat (replicate i gnew)))
 
 
-
--- type Point = (GLfloat, GLfloat)
-
--- instance Num Point where (x, y) + (x', y') = (x + x', y + y')
-
-
--- red   = (1, 0, 0)
--- green = (0, 1, 0)
--- blue  = (0, 0, 1)
-
-
-
--- renderStraight :: Point -> Point -> StateT Point IO ()
--- renderStraight (x0, y0) (x1, y1) =
---     lift $ renderPrimitive Lines $ mapM_ vertex [Vertex2 x0 y0, Vertex2 x1 y1]
-
-
-
--- moveForward :: GLfloat -> StateT Point IO ()
--- moveForward n = do {(x,y) <- get; renderStraight (x,y) (x,y+n); put (x,y+n)} 
-
--- moveBackward :: GLfloat -> StateT Point IO ()
--- moveBackward n = do {(x,y) <- get; renderStraight (x,y) (x,y-n); put (x,y-n)} 
-
--- moveRight :: GLfloat -> StateT Point IO ()
--- moveRight n = do {(x,y) <- get; renderStraight (x,y) (x+n,y); put (x+n,y)} 
-
--- moveLeft :: GLfloat -> StateT Point IO ()
--- moveLeft n = do {(x,y) <- get; renderStraight (x,y) (x-n,y); put (x-n,y)} 
-
-
--- main = do
---   (progname, _) <- getArgsAndInitialize
---   createWindow "Haskell Plumbing Graphics"
-
-
---   instructionStream <- newIORef (preprocessor (stripHeader $ p "(define test '((forward 1) (left 1) (backward 1) (right 1)))") [])
-
---   displayCallback $= display instructionStream
-
---   actionOnWindowClose $= MainLoopReturns -- Without this the program does not close when clicking the exit button..
---   mainLoop
-
-
--- display is = do
---   clear [ColorBuffer]
---   instructionStream <- readIORef is
---   --scale 0.001 0.001 (0.001 :: GLfloat)
---   --runStateT (moveRight 5) (0,0)
---   putStr $ show instructionStream
---   runStateT (interpreter instructionStream) (0,0)
---   flush
 
 --testString = "(define foo '((forward 50) (right 90) (forward 25) (right 90) (forward 30)))"
 --testString = "(define foo '((forward 50) (left 90) (forward 25) (left 90) (forward 30)))"
@@ -654,66 +527,7 @@ display is = do
   draw $ (myJoin graphicInstStream)
   flush
 
--- interpreter :: [Instruction] -> StateT Point IO ()
--- interpreter [] = do {return ()}
--- interpreter ((Forward v):rest) = do {moveForward (getval v); interpreter rest}
--- interpreter ((Backward v):rest) = do {moveBackward (getval v); interpreter rest}
--- interpreter ((MyRight v):rest) = do {moveRight (getval v); interpreter rest}
--- interpreter ((MyLeft v):rest) = do {moveLeft (getval v); interpreter rest}
--- interpreter ((MyColor v):rest) = do {setColor v; interpreter rest}
 
-
--- interpreter :: [Instruction] -> [Instruction]
--- interpreter [] = []
--- interpreter (Penup:rest) = 
--- interpreter (Pendown:rest) =
--- interpreter (Forward:rest) =
--- interpreter (Backward:rest) =
--- interpreter (Right:rest) =
--- interpreter (Left:rest) =
--- intepreter (Color:rest) = 
-
-
-
--- Resulting data type construction:
--- We start by creating an instance of the subroutine data type which is triggered by the 'to' key word.
--- When the subroutine function is called the variables passed in are bound to the strings used inside
--- of the subroutine. 
--- Our subroutine results as:
--- Subroutine starfish :: String [side :: String, angle :: String, inc :: String] 
--- [Repeat [90 :: Expression] [Forward side :: String, Right angle :: String, Make angle :: String (Add angle :: String inc :: String)]]]
--- Add Subroutine to jump table with (starfish, subroutine)
--- Main Instruction stream:
--- [Penup, forward 50 :: expression, pendown, Call starfish :: string 30 :: Expression 2 :: Expression 20 Expression]
-
--- Now send the jump table and the main instruction stream to the interpreter
--- The interpeter iterates through the main instruction stream
--- It first hits Penup and calls the Penup function
--- It now hits the forward instruction and calls the appropriate function.
--- It how its the pendown instruction and calls the Pendown function.
--- Now it hits the call instruction. From the call instruction we get the subroutine from the jump table
--- corresponding to the name in the call instruction. Then we call a function that takes a sub expression and it's parameters.
--- When that function is called it binds the variables in the subroutines data type (side, angle and inc) to the parameters (30, 2, 20)
--- When binding the variables it adds it to an instance of the Local enviroment data type which will save the local enviroment
--- corresponding to this subroutine CALL. After that we recusivly call the same function that took our main instruction stream
--- and send it the instruction stream of the subroutine, the same jump table, and the local enviroment. 
-
-
--- Convert the s-expression to a stream of instructions and a Jump table of subroutines. 
---preprocessor :: Sexpr -> JumpTable -> [Instruction] -> JumpTable
-
-
--- We take the jump table constructed by the s-expression -> instruction translation, the main instruction stream
--- and a local enviroment (empty for initial main instruction stream call)
---interpeter :: JumpTable -> [Instruction] -> LocalEnv -> JumpTable -> [Instruction] -> LocalEnv
-
-
-
-
--- Main 
--- 1. Read in the file and pass it to the parser p.
--- 2. Parser p returns an s-expression
--- 3. Send the s-expression to the preprocessor and get the main instruction stream and the jump table.
--- 4. Send the main instruction stream, the jump table, and an empty env to the interpeter which will go on to run the program
--- and call instructions in the main instruction stream will result in a recurisve call to the intepreter using the
--- instruction stream corresponding to the called function in the jump table.
+-- Stages now: Sexpr -> [Instruction] -> [Graphic]
+-- We can't jump from Sexpr -> [Graphic] or we can't maintain state.
+-- We have to use [Graphic] because it's how we can interface with Lances library.
