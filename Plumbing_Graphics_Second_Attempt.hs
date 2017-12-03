@@ -204,6 +204,6 @@ display counter = do
 
   n <- readIORef counter
 --  draw $ join [Straight 2, Bend 90, Straight 1, Bend 90, Straight 2]
-  draw $ repeat' 5 (join [Invisible 5.0, Straight 5.0,Invisible 5.0])
+  draw $ join [Bend 90.0,Straight 50.0,Bend 90,Straight 25.0,Bend 90,Straight 30.0]
   --draw $ join [Straight 1, Bend 90, Straight 2] 
   flush

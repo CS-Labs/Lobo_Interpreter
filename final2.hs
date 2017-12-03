@@ -485,7 +485,7 @@ data Expression = Mul Data Data
                 | LTE Data Data
                 | GTE Data Data deriving (Show)
 
-data Data = AGLfloat {getval :: GLfloat} | AInt Int | ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
+data Data = AGLfloat {getval :: GLfloat} | AInt Int| ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
 
 data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
 
@@ -499,7 +499,7 @@ data Instruction = Penup
                  | MyLeft Data 
                  | MyRight Data
                  | MyColor Data 
-                 | Repeat Expression [Instruction] -- Action
+                 | MyRepeat Data [Instruction] -- Action
                  | Make String Data
                  | Call String [Expression]-- Call Subroutine
                  | If Data [Instruction] -- Action
@@ -527,39 +527,51 @@ stripHeader :: Sexpr -> Sexpr
 stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
 
 
--- preprocessor :: Sexpr -> [Instruction] -> [Instruction]
--- preprocessor (Nil) instStream = instStream
--- preprocessor (Cons (Cons (Symbol "penup") Nil) rest) instStream = preprocessor rest (instStream ++ [Penup])
--- preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) instStream = preprocessor rest (instStream ++ [Pendown])
--- preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [Forward (AGLfloat (fromIntegral i))])
--- preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [Forward (Var var)])
--- preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [Backward (AGLfloat (fromIntegral i))])
--- preprocessor (Cons (Cons (Symbol "backward") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [Backward (Var var)])
--- preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyRight (AGLfloat (fromIntegral i))])
--- preprocessor (Cons (Cons (Symbol "right") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyRight (Var var)])
--- preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (AGLfloat (fromIntegral i))])
--- preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (Var var)])
--- preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyColor (AInt i)])
+preprocessor :: Sexpr -> [Instruction] -> [Instruction]
+preprocessor (Nil) instStream = instStream
+preprocessor (Cons (Cons (Symbol "penup") Nil) rest) instStream = preprocessor rest (instStream ++ [Penup])
+preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) instStream = preprocessor rest (instStream ++ [Pendown])
+preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [Forward (AGLfloat (fromIntegral i))])
+preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [Forward (Var var)])
+preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [Backward (AGLfloat (fromIntegral i))])
+preprocessor (Cons (Cons (Symbol "backward") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [Backward (Var var)])
+preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyRight (AGLfloat (fromIntegral i))])
+preprocessor (Cons (Cons (Symbol "right") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyRight (Var var)])
+preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (AGLfloat (fromIntegral i))])
+preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (Var var)])
+preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyColor (AInt i)])
+preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) instStream = preprocessor rest (instStream ++ [MyRepeat (AInt i) (preprocessor sexpr [])])
 
 type PenState = String
 
-preprocessor :: Sexpr -> (ColorTriple,PenState,[Graphic]) -> (ColorTriple,PenState,[Graphic])
-preprocessor (Nil) (c,s,graphicInstStream) = (c,s, (graphicInstStream))
-preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (c,s,graphicInstStream)= preprocessor rest (c,"up",graphicInstStream)
-preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (c,s,graphicInstStream) = preprocessor rest (c,"down",graphicInstStream)
-preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = 
-  preprocessor rest (c,s,(graphicInstStream ++ [if s == "down" then Straight (fromIntegral i) else Invisible (fromIntegral i)]))
-preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = 
-  preprocessor rest (c,s,(graphicInstStream ++ [if s == "down" then Straight (fromIntegral (-i)) else Invisible (fromIntegral (-i))]))
-preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = preprocessor rest (c,s,(graphicInstStream ++ [Bend (fromIntegral (-i))]))
-preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = preprocessor rest (c,s,(graphicInstStream ++ [Bend (fromIntegral i)]))
-preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (c,s,graphicInstStream) = 
-  let (_, _, repeatInst) = (preprocessor sexpr (c,s,[])) in  preprocessor rest (c,s, (graphicInstStream ++ (concat (replicate i repeatInst))))
+-- preprocessor :: Sexpr -> (ColorTriple,PenState,[Graphic]) -> (ColorTriple,PenState,[Graphic])
+-- preprocessor (Nil) (c,s,graphicInstStream) = (c,s, (graphicInstStream))
+-- preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (c,s,graphicInstStream)= preprocessor rest (c,"up",graphicInstStream)
+-- preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (c,s,graphicInstStream) = preprocessor rest (c,"down",graphicInstStream)
+-- preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = 
+--   preprocessor rest (c,s,(graphicInstStream ++ [if s == "down" then Straight (fromIntegral i) else Invisible (fromIntegral i)]))
+-- preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = 
+--   preprocessor rest (c,s,(graphicInstStream ++ [if s == "down" then Straight (fromIntegral (-i)) else Invisible (fromIntegral (-i))]))
+-- preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = preprocessor rest (c,s,(graphicInstStream ++ [Bend (fromIntegral (-i))]))
+-- preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) (c,s,graphicInstStream) = preprocessor rest (c,s,(graphicInstStream ++ [Bend (fromIntegral i)]))
+-- preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (c,s,graphicInstStream) = 
+--   let (_, _, repeatInst) = (preprocessor sexpr (c,s,[])) in  preprocessor rest (c,s, (graphicInstStream ++ (concat (replicate i repeatInst))))
 
+type GraphicsState =  (ColorTriple, PenState, [Graphic])
 
-
-getGraphicInstStream :: (ColorTriple,PenState,[Graphic]) -> [Graphic]
+getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,graphicInstStream) = graphicInstStream
+
+graphicsTranslator :: [Instruction] -> GraphicsState -> GraphicsState
+graphicsTranslator [] gs = gs
+graphicsTranslator (Penup:rest) (c,s,g) = graphicsTranslator rest (c,"up",g)
+graphicsTranslator (Pendown:rest) (c,s,g) = graphicsTranslator rest (c,"down",g)
+graphicsTranslator ((Forward val):rest) (c,s,g) = let gnew = g ++ [if s == "down" then Straight (getval val) else Invisible (getval val)] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((Backward val):rest) (c,s,g) = let gnew = g ++ [if s == "down" then Straight (-(getval val)) else Invisible (-(getval val))] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((MyRight val):rest) (c,s,g) = let gnew = g ++ [Bend (-(getval val))] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((MyLeft val):rest) (c,s,g) = let gnew = g ++ [Bend (getval val)] in graphicsTranslator rest (c,s,gnew)
+graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,g) = let (_,_,gnew) = (graphicsTranslator inst (c,s,[])) in graphicsTranslator rest (c,s,(concat (replicate i gnew)))
+
 
 
 -- type Point = (GLfloat, GLfloat)
@@ -614,11 +626,21 @@ getGraphicInstStream (c,s,graphicInstStream) = graphicInstStream
 --   runStateT (interpreter instructionStream) (0,0)
 --   flush
 
+--testString = "(define foo '((forward 50) (right 90) (forward 25) (right 90) (forward 30)))"
+--testString = "(define foo '((forward 50) (left 90) (forward 25) (left 90) (forward 30)))"
+--testString = "(define foo '((forward 50) (right 90) (backward 25) (right 90) (forward 30)))"
+testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
+--testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
+
+debugGetInstStream = (preprocessor (stripHeader $ p testString) [])
+debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down", []))))
+
+
 main = do
   (progname, _) <- getArgsAndInitialize
   createWindow "Haskell Plumbing Graphics"
 
-  graphicInstStream <- newIORef ([Bend 90] ++ (getGraphicInstStream (preprocessor (stripHeader $ p "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))") (white,"down", []))))
+  graphicInstStream <- newIORef ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down", []))))
 
   displayCallback $= display graphicInstStream
 
