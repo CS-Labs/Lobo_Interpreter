@@ -432,9 +432,9 @@ data Expression = Mul Data Data
                 | Div Data Data
                 | Add Data Data
                 | Sub Data Data
-                | GT Data Data
-                | LT Data Data
-                | EQ Data Data
+                | MyGT Data Data
+                | MyLT Data Data
+                | MyEQ Data Data
                 | LTE Data Data
                 | GTE Data Data deriving (Show)
 
@@ -459,8 +459,8 @@ data Instruction = Penup
                  | MyRepeat Data [Instruction] -- Action
                  | Make String Data
                  | Call String [Expression]-- Call Subroutine
-                 | If Data [Instruction] -- Action
-                 | IfElse Data [Instruction] [Instruction] deriving (Show) -- Action Action
+                 | If Expression [Instruction] -- Action
+                 | IfElse Expression [Instruction] [Instruction] deriving (Show) -- Action Action
 
 data Subroutine = Subroutine String [String] [Instruction] -- Name [Variable Names] [Instruction stream]
 newtype JumpTable = JumpTable {getJumpTable :: [(String, Subroutine)]} -- (String, Subroutine)
@@ -497,6 +497,12 @@ preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) instStre
 preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (Var var)])
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyColor (AInt i)])
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) instStream = preprocessor rest (instStream ++ [MyRepeat (AInt i) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyEQ (Var d1) (AInt d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyLT (Var d1) (AInt d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyGT (Var d1) (AInt d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (AInt d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (AInt d2)) (preprocessor sexpr [])])
+
 
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
@@ -521,9 +527,10 @@ graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,p,g) =
 --testString = "(define foo '((forward 50) (right 90) (forward 25) (right 90) (forward 30)))"
 --testString = "(define foo '((forward 50) (left 90) (forward 25) (left 90) (forward 30)))"
 -- testString = "(define foo '((forward 50) (right 90) (backward 25) (right 90) (forward 30)))"
-testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
+-- testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
+testString = "(define foo '((forward 10) (if (>= n 1) (forward 10)))))"
 
 debugGetInstStream = (preprocessor (stripHeader $ p testString) [])
 debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down",(0.0,0.0,0.0),[]))))
