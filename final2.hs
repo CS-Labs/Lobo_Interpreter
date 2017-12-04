@@ -429,11 +429,7 @@ increment n = if n == 5 then 1 else n + 1
 --increment n = if n == 36 then 1 else n + 1
 
 
-data Expression = Mul Data Data
-                | Div Data Data
-                | Add Data Data
-                | Sub Data Data
-                | MyGT Data Data
+data Expression = MyGT Data Data
                 | MyLT Data Data
                 | MyEQ Data Data
                 | LTE Data Data
@@ -462,7 +458,11 @@ data Instruction = Penup
                  | Make String Data
                  | Call String [Expression]-- Call Subroutine
                  | If Expression [Instruction] -- Action
-                 | IfElse Expression [Instruction] [Instruction] deriving (Show) -- Action Action
+                 | IfElse Expression [Instruction] [Instruction] -- Action Action
+                 | MyMul Data Data
+                 | MyDiv Data Data
+                 | MyAdd Data Data
+                 | MySub Data Data deriving (Show)
 
 data Subroutine = Subroutine String [String] [Instruction] -- Name [Variable Names] [Instruction stream]
 newtype JumpTable = JumpTable {getJumpTable :: [(String, Subroutine)]} -- (String, Subroutine)
@@ -507,23 +507,102 @@ preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStr
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) instStream = preprocessor rest (instStream ++ [MyRepeat (AInt i) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) instStream = preprocessor rest (instStream ++ [SetXY (AInt i1) (AInt i2)])
 
+--if else with variable and int
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+--if else with variable and double
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (ADouble d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (ADouble d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (ADouble d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (ADouble d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (ADouble d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+--if else with 2 variables
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) instStream = 
+  preprocessor rest (instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (preprocessor (Cons sexpr1 Nil) []) (preprocessor (Cons sexpr2 Nil) [])])
+
+--if with variable and int
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyEQ (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyLT (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyGT (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (AInt d2)) (preprocessor sexpr [])])
+--if with 2 variables
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyEQ (Var d1) (Var d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyLT (Var d1) (Var d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyGT (Var d1) (Var d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (Var d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (Var d2)) (preprocessor sexpr [])])
+--if with variable and double
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyEQ (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyLT (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyGT (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 
+--add two variables
+preprocessor (Cons (Cons (Symbol "+") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (Var n1) (Var n2)])
+--add with integers
+preprocessor (Cons (Cons (Symbol "+") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (AInt n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "+") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (Var n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "+") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (AInt n1) (Var n2)])
+--add with doubles
+preprocessor (Cons (Cons (Symbol "+") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (ADouble n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "+") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (Var n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "+") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (ADouble n1) (Var n2)])
 
+--multiply two variables
+preprocessor (Cons (Cons (Symbol "*") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (Var n1) (Var n2)])
+--multiply with integers
+preprocessor (Cons (Cons (Symbol "*") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (AInt n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "*") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (Var n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "*") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (AInt n1) (Var n2)])
+--multiply with doubles
+preprocessor (Cons (Cons (Symbol "*") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (ADouble n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "*") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (Var n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "*") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (ADouble n1) (Var n2)])
+
+--subtract two variables
+preprocessor (Cons (Cons (Symbol "-") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (Var n1) (Var n2)])
+--subtract with integers
+preprocessor (Cons (Cons (Symbol "-") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (AInt n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "-") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (Var n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "-") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (AInt n1) (Var n2)])
+--subtract with doubles
+preprocessor (Cons (Cons (Symbol "-") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (ADouble n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "-") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (Var n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "-") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (ADouble n1) (Var n2)])
+
+--divide two variables
+preprocessor (Cons (Cons (Symbol "/") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (Var n1) (Var n2)])
+--divide with integers
+preprocessor (Cons (Cons (Symbol "/") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (AInt n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "/") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (Var n1) (AInt n2)])
+preprocessor (Cons (Cons (Symbol "/") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (AInt n1) (Var n2)])
+--divide with doubles
+preprocessor (Cons (Cons (Symbol "/") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (ADouble n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "/") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (Var n1) (ADouble n2)])
+preprocessor (Cons (Cons (Symbol "/") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (ADouble n1) (Var n2)])
 
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
@@ -557,12 +636,12 @@ graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) = graphicsTranslato
 -- testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
-testString = "(define foo '((forward 10) (if (>= n 5.5) (forward 10)))))"
+-- testString = "(define foo '((forward 10) (if (>= n 5.5) (forward 10)))))"
 --testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
 -- testString = "(define foo '((forward 10) (penup) (setxy 20 20) (pendown) (forward 10) (right 135) (forward 10)))"
-
+testString = "(define foo '((if (>= n m) (+ 1 2) (+ 3 4))))"
 
 debugGetInstStream = (preprocessor (stripHeader $ p testString) [])
 debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down",(0.0,0.0,0.0),[]))))
