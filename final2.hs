@@ -271,6 +271,7 @@ renderStraight (x0, y0) (x1, y1) =
     lift $ renderPrimitive Lines $ mapM_ vertex [Vertex2 x0 y0, Vertex2 x1 y1]
 
 degToRad d = (d / 360) * 2 * pi
+radToDeg r = (r * 180) / pi
 
 move l t' = modify (\(Plumber (x, y) t) -> Plumber (x + l * cos t, y + l * sin t) (t + t'))
 
@@ -455,7 +456,8 @@ data Instruction = Penup
                  | Backward Data
                  | MyLeft Data 
                  | MyRight Data
-                 | MyColor Data 
+                 | MyColor Data
+                 | SetXY Data Data 
                  | MyRepeat Data [Instruction] -- Action
                  | Make String Data
                  | Call String [Expression]-- Call Subroutine
@@ -475,10 +477,16 @@ hueToRGB hue = let x = (1 - (abs $ ((hue / 60) `mod'` 2) - 1)) in
               (getval (AGLfloat 1),getval (AGLfloat 0),getval (AGLfloat x))
 
 updatePoint :: (Float, Float, Float) -> String -> Float -> (Float, Float, Float)
-updatePoint (x,y,a) "F" n = (x,y+n,a)
-updatePoint (x,y,a) "B" n = (x,y-n,a)
+updatePoint (x,y,a) "F" n = (x+(n*cos(degToRad x)),(y+(n*sin(degToRad y))), a)
+updatePoint (x,y,a) "B" n = (x+(n*cos(degToRad x)),(y+(n*sin(degToRad y))),a)
 updatePoint (x,y,a) "R" n = (x,y,a+n)
 updatePoint (x,y,a) "L" n = (x,y,a-n)
+
+getAngle :: Floating a => (a, a, a) -> (a, a) -> a
+getAngle (x0,y0,a) (x,y) = (radToDeg (atan((y-y0)/(x-x0)))) - a
+
+getDist :: Floating a => (a, a, t) -> (a, a) -> a
+getDist (x0,y0,a) (x,y) = (sqrt((x-x0)^2 + (y-y0)^2))
 
 stripHeader :: Sexpr -> Sexpr
 stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
@@ -497,6 +505,9 @@ preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) instStre
 preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyLeft (Var var)])
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyColor (AInt i)])
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) instStream = preprocessor rest (instStream ++ [MyRepeat (AInt i) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) instStream = 
+  preprocessor rest (instStream ++ [SetXY (AInt i1) (AInt i2)])
+
 
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
@@ -507,23 +518,30 @@ graphicsTranslator ((MyColor val):rest) (c,s,p,g) = graphicsTranslator rest (hue
 graphicsTranslator (Penup:rest) (c,s,p,g) = graphicsTranslator rest (c,"up",p,g)
 graphicsTranslator (Pendown:rest) (c,s,p,g) = graphicsTranslator rest (c,"down",p,g)
 graphicsTranslator ((Forward val):rest) (c,s,p,g) = 
-  let gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))] in graphicsTranslator rest (c,s,(updatePoint p "F" (fromIntegral (getintval val))),gnew)
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))] in graphicsTranslator rest (c,s,(updatePoint p "F" (getval val)),gnew)
 graphicsTranslator ((Backward val):rest) (c,s,p,g) = 
-  let gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))] in graphicsTranslator rest (c,s,(updatePoint p "B" (fromIntegral (getintval val))),gnew)
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))] in graphicsTranslator rest (c,s,(updatePoint p "B" (getval val)),gnew)
 graphicsTranslator ((MyRight val):rest) (c,s,p,g) = 
   let gnew = g ++ [Paint c $ Bend (-(getval val))] in graphicsTranslator rest (c,s,(updatePoint p "R" (fromIntegral (getintval val))),gnew)
 graphicsTranslator ((MyLeft val):rest) (c,s,p,g) = 
   let gnew = g ++ [Paint c $ Bend (getval val)] in graphicsTranslator rest (c,s,(updatePoint p "L" (fromIntegral (getintval val))),gnew)
 graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,p,g) = 
   let (_,_,_,gnew) = (graphicsTranslator inst (c,s,p,[])) in graphicsTranslator rest (c,s,p,(concat (replicate i gnew)))
+graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) = graphicsTranslator rest (c,s,pnew,(g ++ gnew))
+  where fltpnt = ((fromIntegral (getintval a)),(fromIntegral (getintval b)))
+        ang = getAngle p fltpnt
+        dist = getDist p fltpnt
+        gnew = [(Bend $ ang), (Invisible dist), (Bend $ -ang)]
+        pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
 
 
 --testString = "(define foo '((forward 50) (right 90) (forward 25) (right 90) (forward 30)))"
 --testString = "(define foo '((forward 50) (left 90) (forward 25) (left 90) (forward 30)))"
 -- testString = "(define foo '((forward 50) (right 90) (backward 25) (right 90) (forward 30)))"
-testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
+--testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
+testString = "(define foo '((forward 10) (setxy 20 20) (forward 10) (right 135) (forward 10)))"
 
 debugGetInstStream = (preprocessor (stripHeader $ p testString) [])
 debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down",(0.0,0.0,0.0),[]))))
