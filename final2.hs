@@ -506,11 +506,22 @@ preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) instStre
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) instStream = preprocessor rest (instStream ++ [MyColor (AInt i)])
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) instStream = preprocessor rest (instStream ++ [MyRepeat (AInt i) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) instStream = preprocessor rest (instStream ++ [SetXY (AInt i1) (AInt i2)])
+
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyEQ (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyLT (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyGT (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (AInt d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (AInt d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyEQ (Var d1) (Var d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyLT (Var d1) (Var d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyGT (Var d1) (Var d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (Var d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (Var d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyEQ (Var d1) (ADouble d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyLT (Var d1) (ADouble d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (MyGT (Var d1) (ADouble d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (ADouble d2)) (preprocessor sexpr [])])
+preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 
 
 
@@ -546,7 +557,7 @@ graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) = graphicsTranslato
 -- testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
-testString = "(define foo '((forward 10) (if (>= n 1) (forward 10)))))"
+testString = "(define foo '((forward 10) (if (>= n 5.5) (forward 10)))))"
 --testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
