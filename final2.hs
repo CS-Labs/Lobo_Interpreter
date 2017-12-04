@@ -531,7 +531,7 @@ graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) = graphicsTranslato
   where fltpnt = ((fromIntegral (getintval a)),(fromIntegral (getintval b)))
         ang = getAngle p fltpnt
         dist = getDist p fltpnt
-        gnew = [(Bend $ ang), (Invisible dist), (Bend $ -ang)]
+        gnew = [(Bend $ ang), (if s == "down" then Straight dist else Invisible dist), (Bend $ -ang)]
         pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
 
 
@@ -541,7 +541,7 @@ graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) = graphicsTranslato
 --testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
-testString = "(define foo '((forward 10) (setxy 20 20) (forward 10) (right 135) (forward 10)))"
+testString = "(define foo '((forward 10) (penup) (setxy 20 20) (pendown) (forward 10) (right 135) (forward 10)))"
 
 debugGetInstStream = (preprocessor (stripHeader $ p testString) [])
 debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down",(0.0,0.0,0.0),[]))))
