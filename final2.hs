@@ -1,33 +1,8 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
-{---------------------------------------------------------------------
-
-           A HASKELL LIBRARY OF MONADIC PARSER COMBINATORS
-
-                          17th April 1997
-
-               Graham Hutton              Erik Meijer
-          University of Nottingham   University of Utrecht
-
-This Haskell 1.3 library is derived from our forthcoming JFP article
-"Monadic Parsing in Haskell".  The library also includes a few extra
-combinators that were not discussed in the article for reasons of space:
-
-   o force (used to make "many" deliver results lazily);
-
-   o digit, lower, upper, letter, alphanum (useful parsers);
-
-   o ident, nat, int (useful token parsers).
-
----------------------------------------------------------------------}
-
-module Parselib
-   (Parser, item, sat, (+++), string, many, many1, sepby, sepby1,
-    chainl, chainl1, char, digit, lower, upper, letter, alphanum,
-    symb, ident, nat, int, token, apply, parse, space, integer, natural) where
-
 import Data.Char
 import Data.Fixed
 import Control.Monad
+import Parselib
 import Control.Applicative hiding (many)
 import Prelude hiding (reverse)
 import Data.IORef
@@ -39,138 +14,6 @@ import Control.Monad hiding (join)
 import Control.Monad.State hiding (join)
 import Control.Monad.Writer hiding (join)
 import Control.Monad.Trans hiding (join)
-
-infixr 5 +++
-
--- Monad of parsers: -------------------------------------------------
-
-newtype Parser a = Parser (String -> [(a,String)])
-
-instance Alternative Parser where
-  (<|>) = mplus
-  empty = mzero
-
-instance Functor Parser where
-  fmap = (<$>)
-
-instance Applicative Parser where
-  pure = return
-  (<*>) = ap
-
-instance Monad Parser where
-   return a      = Parser (\cs -> [(a,cs)])
-   p >>= f       = Parser (\cs -> concat [parse (f a) cs' |
-                                     (a,cs') <- parse p cs])
-
-instance MonadPlus Parser where
-   mzero          = Parser (\cs -> [])
-   p `mplus` q    = Parser (\cs -> parse p cs ++ parse q cs)
-
--- Other parsing primitives: -----------------------------------------
-
-parse           :: Parser a -> String -> [(a,String)]
-parse (Parser p) = p
-
-item            :: Parser Char
-item             = Parser (\cs -> case cs of
-                                     ""     -> []
-                                     (c:cs) -> [(c,cs)])
-
-sat             :: (Char -> Bool) -> Parser Char
-sat p            = do {c <- item; if p c then return c else mzero}
-
--- Efficiency improving combinators: ---------------------------------
-
-force           :: Parser a -> Parser a
-force p          = Parser (\cs -> let xs = parse p cs in
-                              (fst (head xs), snd (head xs)) : tail xs)
-
-(+++)           :: Parser a -> Parser a -> Parser a
-p +++ q          = Parser (\cs -> case parse (p `mplus` q) cs of
-                                     []     -> []
-                                     (x:xs) -> [x])
-
--- Recursion combinators: --------------------------------------------
-
-string          :: String -> Parser String
-string ""        = return ""
-string (c:cs)    = do {char c; string cs; return (c:cs)}
-
-many            :: Parser a -> Parser [a]
-many p           = force (many1 p +++ return [])
-
-many1           :: Parser a -> Parser [a]
-many1 p          = do {a <- p; as <- many p; return (a:as)}
-
-sepby           :: Parser a -> Parser b -> Parser [a]
-p `sepby` sep    = (p `sepby1` sep) +++ return []
-
-sepby1          :: Parser a -> Parser b -> Parser [a]
-p `sepby1` sep   = do {a <- p; as <- many (do {sep; p}); return (a:as)}
-
-chainl          :: Parser a -> Parser (a -> a -> a) -> a -> Parser a
-chainl p op a    = (p `chainl1` op) +++ return a
-
-chainl1         :: Parser a -> Parser (a -> a -> a) -> Parser a
-p `chainl1` op   = do {a <- p; rest a}
-                   where
-                      rest a = do {f <- op; b <- p; rest (f a b)}
-                               +++ return a
-
--- Useful parsers: ---------------------------------------------------
-
-char            :: Char -> Parser Char
-char c           = sat (c ==)
-
-digit           :: Parser Int
-digit            = do {c <- sat isDigit; return (ord c - ord '0')}
-
-lower           :: Parser Char
-lower            = sat isLower
-
-upper           :: Parser Char
-upper            = sat isUpper
-
-letter          :: Parser Char
-letter           = sat isAlpha
-
-alphanum        :: Parser Char
-alphanum         = sat isAlphaNum
-
-symb            :: String -> Parser String
-symb cs          = token (string cs)
-
-ident           :: [String] -> Parser String
-ident css        = do cs <- token identifier
-                      guard (not (elem cs css))
-                      return cs
-
-identifier      :: Parser String
-identifier       = do {c <- lower; cs <- many alphanum; return (c:cs)}
-
-nat             :: Parser Int
-nat              = token natural
-
-natural         :: Parser Int
-natural          = digit `chainl1` return (\m n -> 10*m + n)
-
-int             :: Parser Int
-int              = token integer
-
-integer         :: Parser Int
-integer          = do {char '-'; n <- natural; return (-n)} +++ nat
-
--- Lexical combinators: ----------------------------------------------
-
-space           :: Parser String
-space            = many (sat isSpace)
-
-token           :: Parser a -> Parser a
-token p          = do {a <- p; space; return a}
-
-apply           :: Parser a -> String -> [(a,String)]
-apply p          = parse (do {space; p})
-
 
 data Sexpr = Symbol String | SexprInt Int | SexprDouble Double | Nil | Cons Sexpr Sexpr
 
@@ -459,6 +302,7 @@ data Instruction = Penup
                  | Call String [Expression]-- Call Subroutine
                  | If Expression [Instruction] -- Action
                  | IfElse Expression [Instruction] [Instruction] -- Action Action
+                 | Arithmetic Sexpr
                  | MyMul Data Data
                  | MyDiv Data Data
                  | MyAdd Data Data
@@ -560,49 +404,11 @@ preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (LTE (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprDouble d2) Nil))) sexpr)) rest) instStream = preprocessor rest (instStream ++ [If (GTE (Var d1) (ADouble d2)) (preprocessor sexpr [])])
 
---add two variables
-preprocessor (Cons (Cons (Symbol "+") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (Var n1) (Var n2)])
---add with integers
-preprocessor (Cons (Cons (Symbol "+") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (AInt n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "+") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (Var n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "+") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (AInt n1) (Var n2)])
---add with doubles
-preprocessor (Cons (Cons (Symbol "+") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (ADouble n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "+") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (Var n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "+") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyAdd (ADouble n1) (Var n2)])
-
---multiply two variables
-preprocessor (Cons (Cons (Symbol "*") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (Var n1) (Var n2)])
---multiply with integers
-preprocessor (Cons (Cons (Symbol "*") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (AInt n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "*") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (Var n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "*") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (AInt n1) (Var n2)])
---multiply with doubles
-preprocessor (Cons (Cons (Symbol "*") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (ADouble n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "*") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (Var n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "*") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyMul (ADouble n1) (Var n2)])
-
---subtract two variables
-preprocessor (Cons (Cons (Symbol "-") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (Var n1) (Var n2)])
---subtract with integers
-preprocessor (Cons (Cons (Symbol "-") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (AInt n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "-") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (Var n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "-") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (AInt n1) (Var n2)])
---subtract with doubles
-preprocessor (Cons (Cons (Symbol "-") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (ADouble n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "-") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (Var n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "-") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MySub (ADouble n1) (Var n2)])
-
---divide two variables
-preprocessor (Cons (Cons (Symbol "/") (Cons (Symbol n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (Var n1) (Var n2)])
---divide with integers
-preprocessor (Cons (Cons (Symbol "/") (Cons (SexprInt n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (AInt n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "/") (Cons (Symbol n1) (Cons (SexprInt n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (Var n1) (AInt n2)])
-preprocessor (Cons (Cons (Symbol "/") (Cons (SexprInt n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (AInt n1) (Var n2)])
---divide with doubles
-preprocessor (Cons (Cons (Symbol "/") (Cons (SexprDouble n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (ADouble n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "/") (Cons (Symbol n1) (Cons (SexprDouble n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (Var n1) (ADouble n2)])
-preprocessor (Cons (Cons (Symbol "/") (Cons (SexprDouble n1) (Cons (Symbol n2) Nil))) rest) instStream = preprocessor rest (instStream ++ [MyDiv (ADouble n1) (Var n2)])
+--arithmetic
+preprocessor (Cons (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil))) rest) instStream = preprocessor rest (instStream ++ [Arithmetic (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil)))])
+preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) instStream = preprocessor rest (instStream ++ [Arithmetic (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil)))])
+preprocessor (Cons (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil))) rest) instStream = preprocessor rest (instStream ++ [Arithmetic (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil)))])
+preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) instStream = preprocessor rest (instStream ++ [Arithmetic (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil)))])
 
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
@@ -630,18 +436,20 @@ graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) = graphicsTranslato
         pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
 
 
+
+
 --testString = "(define foo '((forward 50) (right 90) (forward 25) (right 90) (forward 30)))"
 --testString = "(define foo '((forward 50) (left 90) (forward 25) (left 90) (forward 30)))"
 -- testString = "(define foo '((forward 50) (right 90) (backward 25) (right 90) (forward 30)))"
 -- testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
--- testString = "(define foo '((forward 10) (if (>= n 5.5) (forward 10)))))"
---testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
+testString = "(define foo '((forward 10) (if (>= n 5.5) (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100)))))"
+-- testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
 -- testString = "(define foo '((forward 10) (penup) (setxy 20 20) (pendown) (forward 10) (right 135) (forward 10)))"
-testString = "(define foo '((if (>= n m) (+ 1 2) (+ 3 4))))"
+-- testString = "(define foo '((+ 1 (+1 2))))"
 
 debugGetInstStream = (preprocessor (stripHeader $ p testString) [])
 debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (preprocessor (stripHeader $ p testString) []) (white,"down",(0.0,0.0,0.0),[]))))
