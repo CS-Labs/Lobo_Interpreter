@@ -297,10 +297,11 @@ data Instruction = Penup
                  | MyLeft Data 
                  | MyRight Data
                  | MyColor Data
+                 | NoOp Data -- Perform no operation, just hold data. 
                  | SetXY Data Data 
                  | MyRepeat Data [Instruction] -- Action
                  | Make String Data
-                 | Call String [Expression]-- Call Subroutine
+                 | Call String [Instruction]-- Call Subroutine
                  | If Expression [Instruction] -- Action
                  | IfElse Expression [Instruction] [Instruction] -- Action Action
                  | Arithmetic Sexpr
@@ -309,7 +310,7 @@ data Instruction = Penup
                  | MyAdd Data Data
                  | MySub Data Data deriving (Show)
 
-data Subroutine = Subroutine String [String] [Instruction] -- Name [Variable Names] [Instruction stream]
+data Subroutine = Subroutine String [Instruction] [Instruction]  deriving (Show) -- Name [Variable Names] [Instruction stream]
 type JumpTable = [(String, Subroutine)]
 
 hueToRGB :: Float -> ColorTriple
@@ -354,7 +355,11 @@ stripJumpTable :: ([Instruction], JumpTable) -> [Instruction]
 stripJumpTable (inst,jt) = inst
 
 preprocessor :: Sexpr -> ([Instruction], JumpTable) -> ([Instruction], JumpTable)
-preprocessor (Nil) instStream = instStream
+preprocessor (Nil) (instStream, jt) = (instStream, jt)
+preprocessor (Cons (SexprInt val) Nil) (instStream, jt) = ((instStream ++ [NoOp (AInt val)]), jt)
+preprocessor (Cons (SexprDouble val) Nil) (instStream, jt) = ((instStream ++ [NoOp (ADouble val)]), jt)
+preprocessor (Cons (SexprInt val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (AInt val)]), jt)
+preprocessor (Cons (SexprDouble val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (ADouble val)]), jt)
 preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Penup]),jt)
 preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Pendown]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (AGLfloat (fromIntegral i))]),jt)
@@ -368,6 +373,24 @@ preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) (instStr
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (AInt i)]),jt)
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRepeat (AInt i) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [SetXY (AInt i1) (AInt i2)]),jt)
+
+-- Sub routines --
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) Nil) sexpr))) rest) (instStream, jt) = preprocessor rest (instStream, updatedJt)
+  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
+        params = [NoOp (Var arg1)]
+        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) Nil)) sexpr))) rest) (instStream, jt) =  preprocessor rest (instStream, updatedJt)
+  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
+        params = [NoOp (Var arg1), NoOp (Var arg2)]
+        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) Nil))) sexpr))) rest)  (instStream, jt) =  preprocessor rest (instStream, updatedJt)
+  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
+        params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3)]
+        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) (Cons (Symbol arg4) Nil)))) sexpr))) rest)  (instStream, jt)=  preprocessor rest (instStream, updatedJt)
+  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
+        params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3), NoOp (Var arg4)]
+        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
 
 --if else with variable and int
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
@@ -428,6 +451,9 @@ preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (in
 preprocessor (Cons (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Arithmetic (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
 preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Arithmetic (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
 
+-- Any non-matched symbols should be function calls. 
+preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Call fCall (stripJumpTable $ preprocessor sexpr ([], jt))]) ,jt)
+
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
 
@@ -463,11 +489,12 @@ graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) jt env = graphicsTr
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
 --testString = "(define foo '((forward 10) (if (>= n 5.5) (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100)))))"
-testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
+-- testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
 -- testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
 -- testString = "(define foo '((forward 10) (penup) (setxy 20 20) (pendown) (forward 10) (right 135) (forward 10)))"
 -- testString = "(define foo '((+ 1 (+1 2))))"
+testString = "(define foo '((to testsub (arg) (forward 1)) (testsub 10)))"
 
 (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
