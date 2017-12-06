@@ -278,7 +278,7 @@ data Expression = MyGT Data Data
                 | LTE Data Data
                 | GTE Data Data deriving (Show)
 
-data Data = AGLfloat {getval :: GLfloat} | AInt {getintval :: Int} | ABool Bool | AFloat Float | AString {getstrval :: String} | DList [Data] | VarList [(String, Data)] | Var {getvarstr :: String}  | Expression deriving (Show)
+data Data = AGLfloat {getval :: GLfloat} | AInt {getintval :: Int} | ABool Bool | AFloat Float | AString {getstrval :: String} | DList [Data] | VarList [(String, Data)] | Var {getvarstr :: String}  | Expression | Arithmetic Sexpr deriving (Show)
 
 --data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
 type LocalEnv = [(String, Data)]
@@ -304,7 +304,7 @@ data Instruction = Penup
                  | Call String [Instruction]-- Call Subroutine
                  | If Expression [Instruction] -- Action
                  | IfElse Expression [Instruction] [Instruction] -- Action Action
-                 | Arithmetic Sexpr
+                 | ArithWrapper {getexpr :: Data} 
                  | MyMul Data Data
                  | MyDiv Data Data
                  | MyAdd Data Data
@@ -378,6 +378,9 @@ preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (instStream, jt) = preproce
 preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Pendown]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (Var var)]),jt)
+
+preprocessor (Cons (Cons (Symbol "forward") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Forward $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
+
 preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Backward (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "backward") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Backward (Var var)]),jt)
 preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRight (AGLfloat (fromIntegral i))]),jt)
@@ -465,16 +468,62 @@ preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (GTE (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
 
 --arithmetic
-preprocessor (Cons (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Arithmetic (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Arithmetic (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Arithmetic (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Arithmetic (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $Arithmetic (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
 
 -- Any non-matched symbols should be function calls. 
 preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Call fCall (stripJumpTable $ preprocessor sexpr ([], jt))]) ,jt)
 
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
+
+
+-- For nested arithmetic expressions try calling solver recursively.
+-- TODO; there is probably a more concise way to do this
+arithmeticSolver :: Sexpr -> LocalEnv -> Data
+-- Given Just constants.
+arithmeticSolver (Cons (Symbol "+") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat (fromIntegral (i1+i2)))
+arithmeticSolver (Cons (Symbol "-") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat (fromIntegral (i1-i2)))
+arithmeticSolver (Cons (Symbol "*") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat (fromIntegral (i1*i2)))
+arithmeticSolver (Cons (Symbol "/") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat  ((fromIntegral i1)/(fromIntegral i2)))
+arithmeticSolver (Cons (Symbol "+") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1+f2))
+arithmeticSolver (Cons (Symbol "-") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1-f2))
+arithmeticSolver (Cons (Symbol "*") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1*f2))
+arithmeticSolver (Cons (Symbol "/") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1/f2))
+-- With variables.
+arithmeticSolver (Cons (Symbol "+") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1) +i2)
+arithmeticSolver (Cons (Symbol "-") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1)-i2)
+arithmeticSolver (Cons (Symbol "*") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1)*i2)
+arithmeticSolver (Cons (Symbol "/") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1)/i2)
+arithmeticSolver (Cons (Symbol "+") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1+f2)
+arithmeticSolver (Cons (Symbol "-") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1-f2)
+arithmeticSolver (Cons (Symbol "*") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1*f2)
+arithmeticSolver (Cons (Symbol "/") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1/f2)
+
+arithmeticSolver (Cons (Symbol "+") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 + (fromIntegral i2))
+arithmeticSolver (Cons (Symbol "-") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 - (fromIntegral i2))
+arithmeticSolver (Cons (Symbol "*") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 * (fromIntegral i2))
+arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 / (fromIntegral i2))
+arithmeticSolver (Cons (Symbol "+") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1+f2)
+arithmeticSolver (Cons (Symbol "-") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1-f2)
+arithmeticSolver (Cons (Symbol "*") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1*f2)
+arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1/f2)
+
+arithmeticSolver (Cons (Symbol "+") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1+i2)
+  where i1 = getval $ resolveVar env s1
+        i2 = getval $ resolveVar env s2
+arithmeticSolver (Cons (Symbol "-") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1-i2)
+  where i1 = getval $ resolveVar env s1
+        i2 = getval $ resolveVar env s2
+arithmeticSolver (Cons (Symbol "*") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1*i2)
+  where i1 = getval $ resolveVar env s1
+        i2 = getval $ resolveVar env s2
+arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1/i2)
+  where i1 = getval $ resolveVar env s1
+        i2 = getval $ resolveVar env s2
+
 
 
 graphicsTranslator :: [Instruction] -> GraphicsState -> JumpTable -> LocalEnv -> GraphicsState
@@ -489,6 +538,10 @@ graphicsTranslator ((Make var val):rest) (c,s,p,g) jt env = graphicsTranslator r
   where updatedEnv = updateEnv [(var,val)] env
 graphicsTranslator ((Forward (Var var)):rest) (c,s,p,g) jt env =  graphicsTranslator rest (c,s,pnew,gnew) jt env
   where val = getval $ resolveVar env var
+        pnew = (updatePoint p "F" val)
+        gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
+graphicsTranslator ((Forward (Arithmetic arithSexpr)):rest) (c,s,p,g) jt env =  graphicsTranslator rest (c,s,pnew,gnew) jt env
+  where val = getval $ arithmeticSolver arithSexpr env
         pnew = (updatePoint p "F" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
 graphicsTranslator ((Forward val):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
@@ -557,7 +610,9 @@ graphicsTranslator ((Call funcName args):rest) (c,s,p,g) jt env = graphicsTransl
 --testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward arg1) (right arg2) (forward 5) (right arg2) (color arg3) (forward arg1)) (testsub 10 90 200)))"
 --testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (forward arg1) (right arg2) (color arg3) (forward arg1) (right arg2) (forward arg4)) (testsub 10 90 232 80)))"
 --testString = "(define foo '((to square (side)(repeat 4 (forward side) (right 90))) (square 50) (square 25) (square 5))))"
-testString = "(define foo '((to testsub (arg col) (make col 200) (color col) (forward arg)) (testsub 10 25)))"
+-- testString = "(define foo '((to testsub (arg col) (make col 200) (color col) (forward arg)) (testsub 10 25)))"
+--testString = "(define foo '((forward (* 2 2))))"
+testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward (+ arg2 8)) (right 90) (forward (* arg2 arg1)) (right 90) (forward (* 2 5))) (testsub 1 2 3))))"
 
 
 
