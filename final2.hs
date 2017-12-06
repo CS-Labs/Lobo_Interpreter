@@ -389,6 +389,9 @@ preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) (instSt
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprFloat i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (AGLfloat i)]),jt)
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRepeat (AInt i) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [SetXY (AInt i1) (AInt i2)]),jt)
+preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprInt i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat (fromIntegral i))]),jt)
+preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprFloat i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat i)]),jt)
+
 
 -- Sub routines --
 preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) Nil) sexpr))) rest) (instStream, jt) = preprocessor rest (instStream, updatedJt)
@@ -482,6 +485,8 @@ graphicsTranslator ((MyColor (Var var)):rest) (c,s,p,g) jt env = graphicsTransla
 graphicsTranslator ((MyColor val):rest) (c,s,p,g) jt env = graphicsTranslator rest (hueToRGB (getval val),s,p,g) jt env
 graphicsTranslator (Penup:rest) (c,s,p,g) jt env = graphicsTranslator rest (c,"up",p,g) jt env
 graphicsTranslator (Pendown:rest) (c,s,p,g) jt env = graphicsTranslator rest (c,"down",p,g) jt env
+graphicsTranslator ((Make var val):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,p,g) jt updatedEnv
+  where updatedEnv = updateEnv [(var,val)] env
 graphicsTranslator ((Forward (Var var)):rest) (c,s,p,g) jt env =  graphicsTranslator rest (c,s,pnew,gnew) jt env
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "F" val)
@@ -551,8 +556,8 @@ graphicsTranslator ((Call funcName args):rest) (c,s,p,g) jt env = graphicsTransl
 --testString = "(define foo '((to testsub (arg1 arg2) (forward arg1) (right arg2) (forward 5) (right arg2) (forward arg1)) (testsub 10 90)))"
 --testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward arg1) (right arg2) (forward 5) (right arg2) (color arg3) (forward arg1)) (testsub 10 90 200)))"
 --testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (forward arg1) (right arg2) (color arg3) (forward arg1) (right arg2) (forward arg4)) (testsub 10 90 232 80)))"
---testString = "(define foo '((to testsub (arg col) (make col 200) (color col) (forward arg)) (testsub 10 25)))"
---testString = "(define foo '((to testsub (arg col) (make col 200) (color col) (forward arg)) (testsub 10 25)))"
+--testString = "(define foo '((to square (side)(repeat 4 (forward side) (right 90))) (square 50) (square 25) (square 5))))"
+testString = "(define foo '((to testsub (arg col) (make col 200) (color col) (forward arg)) (testsub 10 25)))"
 
 
 
