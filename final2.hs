@@ -278,9 +278,10 @@ data Expression = MyGT Data Data
                 | LTE Data Data
                 | GTE Data Data deriving (Show)
 
-data Data = AGLfloat {getval :: GLfloat} | AInt {getintval :: Int} | ABool Bool | ADouble Double | AString String | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
+data Data = AGLfloat {getval :: GLfloat} | AInt {getintval :: Int} | ABool Bool | ADouble Double | AString {getstrval :: String} | DList [Data] | VarList [(String, Data)] | Var String  | Expression deriving (Show)
 
-data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
+--data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
+type LocalEnv = [(String, Data)]
 
 type PenState = String
 
@@ -325,6 +326,20 @@ updatePoint (x,y,a) "F" n = (x+(n*cos(degToRad x)),(y+(n*sin(degToRad y))), a)
 updatePoint (x,y,a) "B" n = (x+(n*cos(degToRad x)),(y+(n*sin(degToRad y))),a)
 updatePoint (x,y,a) "R" n = (x,y,a+n)
 updatePoint (x,y,a) "L" n = (x,y,a-n)
+
+resolveVar :: LocalEnv -> String -> Data
+resolveVar env var = head $ [val | (vartmp, val) <- env, var == vartmp]
+
+-- -- To call function pass: zip vars values
+updateEnv :: [(String, Data)] -> LocalEnv -> LocalEnv
+updateEnv [] env = env
+updateEnv bindings@((var, val):xs) env = updateEnv xs (updateEnvHelper var val env)
+  
+updateEnvHelper :: String -> Data -> LocalEnv -> LocalEnv
+updateEnvHelper var val env = if var `elem` [s | (s,v) <- env]
+  then map (\(s,v) -> if s == var then (s, val) else (s,v)) env
+  else [(var,val)] ++ env
+
 
 getAngle :: Floating a => (a, a, a) -> (a, a) -> a
 getAngle (x0,y0,a) (x,y) = (radToDeg (atan((y-y0)/(x-x0)))) - a
@@ -416,22 +431,22 @@ preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (in
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
 
-graphicsTranslator :: [Instruction] -> GraphicsState -> JumpTable -> GraphicsState
-graphicsTranslator [] gs jt = gs
-graphicsTranslator ((MyColor val):rest) (c,s,p,g) jt = graphicsTranslator rest (hueToRGB (fromIntegral (getintval val)),s,p,g) jt
-graphicsTranslator (Penup:rest) (c,s,p,g) jt = graphicsTranslator rest (c,"up",p,g) jt
-graphicsTranslator (Pendown:rest) (c,s,p,g) jt = graphicsTranslator rest (c,"down",p,g) jt
-graphicsTranslator ((Forward val):rest) (c,s,p,g) jt = 
-  let gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))] in graphicsTranslator rest (c,s,(updatePoint p "F" (getval val)),gnew) jt
-graphicsTranslator ((Backward val):rest) (c,s,p,g) jt = 
-  let gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))] in graphicsTranslator rest (c,s,(updatePoint p "B" (getval val)),gnew) jt
-graphicsTranslator ((MyRight val):rest) (c,s,p,g) jt = 
-  let gnew = g ++ [Paint c $ Bend (-(getval val))] in graphicsTranslator rest (c,s,(updatePoint p "R" (fromIntegral (getintval val))),gnew) jt
-graphicsTranslator ((MyLeft val):rest) (c,s,p,g) jt = 
-  let gnew = g ++ [Paint c $ Bend (getval val)] in graphicsTranslator rest (c,s,(updatePoint p "L" (fromIntegral (getintval val))),gnew) jt
-graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,p,g) jt = 
-  let (_,_,_,gnew) = (graphicsTranslator inst (c,s,p,[])) jt in graphicsTranslator rest (c,s,p,(concat (replicate i gnew))) jt
-graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) jt = graphicsTranslator rest (c,s,pnew,(g ++ gnew)) jt
+graphicsTranslator :: [Instruction] -> GraphicsState -> JumpTable -> LocalEnv -> GraphicsState
+graphicsTranslator [] gs jt env = gs
+graphicsTranslator ((MyColor val):rest) (c,s,p,g) jt env = graphicsTranslator rest (hueToRGB (fromIntegral (getintval val)),s,p,g) jt env
+graphicsTranslator (Penup:rest) (c,s,p,g) jt env = graphicsTranslator rest (c,"up",p,g) jt env
+graphicsTranslator (Pendown:rest) (c,s,p,g) jt env = graphicsTranslator rest (c,"down",p,g) jt env
+graphicsTranslator ((Forward val):rest) (c,s,p,g) jt env = 
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))] in graphicsTranslator rest (c,s,(updatePoint p "F" (getval val)),gnew) jt env
+graphicsTranslator ((Backward val):rest) (c,s,p,g) jt env = 
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))] in graphicsTranslator rest (c,s,(updatePoint p "B" (getval val)),gnew) jt env
+graphicsTranslator ((MyRight val):rest) (c,s,p,g) jt env = 
+  let gnew = g ++ [Paint c $ Bend (-(getval val))] in graphicsTranslator rest (c,s,(updatePoint p "R" (fromIntegral (getintval val))),gnew) jt env
+graphicsTranslator ((MyLeft val):rest) (c,s,p,g) jt env = 
+  let gnew = g ++ [Paint c $ Bend (getval val)] in graphicsTranslator rest (c,s,(updatePoint p "L" (fromIntegral (getintval val))),gnew) jt env
+graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,p,g) jt env = 
+  let (_,_,_,gnew) = (graphicsTranslator inst (c,s,p,[])) jt env in graphicsTranslator rest (c,s,p,(concat (replicate i gnew))) jt env
+graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) jt env = graphicsTranslator rest (c,s,pnew,(g ++ gnew)) jt env
   where fltpnt = ((fromIntegral (getintval a)),(fromIntegral (getintval b)))
         ang = getAngle p fltpnt
         dist = getDist p fltpnt
@@ -456,7 +471,7 @@ testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (col
 
 (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
-debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator debugGetInstStream (white,"down",(0.0,0.0,0.0),[]) debugJt)))
+debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator debugGetInstStream (white,"down",(0.0,0.0,0.0),[]) debugJt [])))
     where (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
 
@@ -464,7 +479,7 @@ main = do
   (progname, _) <- getArgsAndInitialize
   createWindow "Haskell Plumbing Graphics"
   let (instructionStream, jt) = (preprocessor (stripHeader $ p testString) ([],[]))
-  let graphicsInstructionStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator instructionStream (white,"down",(0.0,0.0,0.0),[]) jt)))
+  let graphicsInstructionStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator instructionStream (white,"down",(0.0,0.0,0.0),[]) jt [])))
   wrappedInstStream <- newIORef graphicsInstructionStream
   displayCallback $= display wrappedInstStream
   actionOnWindowClose $= MainLoopReturns
