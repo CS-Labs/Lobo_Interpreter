@@ -297,7 +297,7 @@ data Instruction = Penup
                  | MyLeft Data 
                  | MyRight Data
                  | MyColor Data
-                 | NoOp Data -- Perform no operation, just hold data. 
+                 | NoOp {unwrap :: Data} -- Perform no operation, just hold data. 
                  | SetXY Data Data 
                  | MyRepeat Data [Instruction] -- Action
                  | Make String Data
@@ -310,7 +310,7 @@ data Instruction = Penup
                  | MyAdd Data Data
                  | MySub Data Data deriving (Show)
 
-data Subroutine = Subroutine String [Instruction] [Instruction]  deriving (Show) -- Name [Variable Names] [Instruction stream]
+type Subroutine =  ([Instruction], [Instruction])  -- Name [Variable Names] [Instruction stream]
 type JumpTable = [(String, Subroutine)]
 
 hueToRGB :: Float -> ColorTriple
@@ -330,6 +330,18 @@ updatePoint (x,y,a) "L" n = (x,y,a-n)
 
 resolveVar :: LocalEnv -> String -> Data
 resolveVar env var = head $ [val | (vartmp, val) <- env, var == vartmp]
+
+getSubRoute :: String -> JumpTable -> Subroutine
+getSubRoute func jt = head $ [subroute | (funcName, subroute) <- jt, funcName == func]
+
+getParams :: Subroutine -> [String]
+getParams (params, ops) = [getstrval $ unwrap var | var <- params]
+
+getSubRouteInst :: Subroutine -> [Instruction]
+getSubRouteInst (params, ops) = ops
+
+resolveArgs :: [Instruction] -> [Data]
+resolveArgs inst = [unwrap val | val <- inst]
 
 -- -- To call function pass: zip vars values
 updateEnv :: [(String, Data)] -> LocalEnv -> LocalEnv
@@ -378,19 +390,19 @@ preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2
 preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) Nil) sexpr))) rest) (instStream, jt) = preprocessor rest (instStream, updatedJt)
   where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
         params = [NoOp (Var arg1)]
-        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
+        updatedJt = jt ++ [(funcName, (params, subroute))]
 preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) Nil)) sexpr))) rest) (instStream, jt) =  preprocessor rest (instStream, updatedJt)
   where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
         params = [NoOp (Var arg1), NoOp (Var arg2)]
-        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
+        updatedJt = jt ++ [(funcName, (params, subroute))]
 preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) Nil))) sexpr))) rest)  (instStream, jt) =  preprocessor rest (instStream, updatedJt)
   where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
         params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3)]
-        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
+        updatedJt = jt ++ [(funcName, (params, subroute))]
 preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) (Cons (Symbol arg4) Nil)))) sexpr))) rest)  (instStream, jt)=  preprocessor rest (instStream, updatedJt)
   where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
         params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3), NoOp (Var arg4)]
-        updatedJt = jt ++ [(funcName, Subroutine funcName params subroute)]
+        updatedJt = jt ++ [(funcName, (params, subroute))]
 
 --if else with variable and int
 preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
@@ -457,6 +469,7 @@ preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) (instStream, jt) = preproce
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (c,s,p,graphicInstStream) = graphicInstStream
 
+
 graphicsTranslator :: [Instruction] -> GraphicsState -> JumpTable -> LocalEnv -> GraphicsState
 graphicsTranslator [] gs jt env = gs
 graphicsTranslator ((MyColor val):rest) (c,s,p,g) jt env = graphicsTranslator rest (hueToRGB (fromIntegral (getintval val)),s,p,g) jt env
@@ -478,8 +491,20 @@ graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) jt env = graphicsTr
         dist = getDist p fltpnt
         gnew = [(Bend $ ang), (if s == "down" then Straight dist else Invisible dist), (Bend $ -ang)]
         pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
+graphicsTranslator ((Call funcName args):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,p,gnew) jt env
+  where subProc = getSubRoute funcName jt
+        params = getParams subProc
+        subProcInst = getSubRouteInst subProc
+        resolvedArgs = resolveArgs args
+        bindings = zip params resolvedArgs
+        subProcEnv = updateEnv bindings []
+        (_,_,_,gnew) = graphicsTranslator subProcInst (c,s,p,g) jt subProcEnv
 
 
+
+-- When hitting a call
+-- Get the corresponding subprocess from the jump table
+-- Recursively call the translator with the new enviroment and instruction list
 
 
 --testString = "(define foo '((forward 50) (right 90) (forward 25) (right 90) (forward 30)))"
