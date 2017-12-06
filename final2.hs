@@ -378,23 +378,25 @@ preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (instStream, jt) = preproce
 preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Pendown]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (Var var)]),jt)
-
 preprocessor (Cons (Cons (Symbol "forward") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Forward $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
-
 preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Backward (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "backward") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Backward (Var var)]),jt)
+preprocessor (Cons (Cons (Symbol "backward") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Backward $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRight (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "right") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRight (Var var)]),jt)
+preprocessor (Cons (Cons (Symbol "right") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyRight $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyLeft (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyLeft (Var var)]),jt)
+preprocessor (Cons (Cons (Symbol "left") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyLeft $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "color") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (Var var)]),jt)
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprFloat i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (AGLfloat i)]),jt)
+preprocessor (Cons (Cons (Symbol "color") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyColor $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRepeat (AInt i) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [SetXY (AInt i1) (AInt i2)]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprInt i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprFloat i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat i)]),jt)
-
+preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) arithSexpr)) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
 
 -- Sub routines --
 preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) Nil) sexpr))) rest) (instStream, jt) = preprocessor rest (instStream, updatedJt)
@@ -531,52 +533,89 @@ graphicsTranslator [] gs jt env = gs
 graphicsTranslator ((MyColor (Var var)):rest) (c,s,p,g) jt env = graphicsTranslator rest (cnew,s,p,g) jt env
   where val = getval $ resolveVar env var
         cnew = hueToRGB val
+
+graphicsTranslator ((MyColor (Arithmetic arithSexpr)):rest) (c,s,p,g) jt env = graphicsTranslator rest (cnew,s,p,g) jt env
+  where val = getval $ arithmeticSolver arithSexpr env
+        cnew = hueToRGB val
+
 graphicsTranslator ((MyColor val):rest) (c,s,p,g) jt env = graphicsTranslator rest (hueToRGB (getval val),s,p,g) jt env
 graphicsTranslator (Penup:rest) (c,s,p,g) jt env = graphicsTranslator rest (c,"up",p,g) jt env
 graphicsTranslator (Pendown:rest) (c,s,p,g) jt env = graphicsTranslator rest (c,"down",p,g) jt env
+
+graphicsTranslator ((Make var (Arithmetic arithSexpr)):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,p,g) jt updatedEnv
+  where val = arithmeticSolver arithSexpr env
+        updatedEnv = updateEnv [(var,val)] env
+
 graphicsTranslator ((Make var val):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,p,g) jt updatedEnv
   where updatedEnv = updateEnv [(var,val)] env
+
 graphicsTranslator ((Forward (Var var)):rest) (c,s,p,g) jt env =  graphicsTranslator rest (c,s,pnew,gnew) jt env
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "F" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
+
 graphicsTranslator ((Forward (Arithmetic arithSexpr)):rest) (c,s,p,g) jt env =  graphicsTranslator rest (c,s,pnew,gnew) jt env
   where val = getval $ arithmeticSolver arithSexpr env
         pnew = (updatePoint p "F" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
+
 graphicsTranslator ((Forward val):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where pnew = (updatePoint p "F" ((getval val) :: Float))
         gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))]
+
 graphicsTranslator ((Backward (Var var)):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "B" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
+
+graphicsTranslator ((Backward (Arithmetic arithSexpr)):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
+  where val = getval $ arithmeticSolver arithSexpr env
+        pnew = (updatePoint p "B" val)
+        gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
+
 graphicsTranslator ((Backward val):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where pnew = (updatePoint p "B" ((getval val) :: Float))
         gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))]
+
 graphicsTranslator ((MyRight (Var var)):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "R" val)
         gnew = g ++ [Paint c $ Bend (-val)]
+
+graphicsTranslator ((MyRight (Arithmetic arithSexpr)):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
+  where val = getval $ arithmeticSolver arithSexpr env
+        pnew = (updatePoint p "R" val)
+        gnew = g ++ [Paint c $ Bend (-val)]
+
 graphicsTranslator ((MyRight val):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where pnew = (updatePoint p "R" ((getval val) :: Float))
         gnew = g ++ [Paint c $ Bend (-(getval val))]
+
 graphicsTranslator ((MyLeft (Var var)):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "L" val)
         gnew = g ++ [Paint c $ Bend val]
+
+graphicsTranslator ((MyLeft (Arithmetic arithSexpr)):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
+  where val = getval $ arithmeticSolver arithSexpr env
+        pnew = (updatePoint p "L" val)
+        gnew = g ++ [Paint c $ Bend val]
+
 graphicsTranslator ((MyLeft val):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where pnew = (updatePoint p "L" ((getval val) :: Float))
         gnew = g ++ [Paint c $ Bend (getval val)]
+
 graphicsTranslator ((MyRepeat (AInt i) inst):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,p,gnew) jt env
   where (_,_,_, gOneIter) = (graphicsTranslator inst (c,s,p,[])) jt env
         gnew = g ++ (concat $ replicate i gOneIter)
+
 graphicsTranslator ((SetXY a b):rest) (c,s,p@(x,y,oldang),g) jt env = graphicsTranslator rest (c,s,pnew,gnew) jt env
   where fltpnt = ((fromIntegral (getintval a)),(fromIntegral (getintval b)))
         ang = getAngle p fltpnt
         dist = getDist p fltpnt
         gnew = g ++ [(Bend $ ang), (if s == "down" then Straight dist else Invisible dist), (Bend $ -ang)]
         pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
+
 graphicsTranslator ((Call funcName args):rest) (c,s,p,g) jt env = graphicsTranslator rest (c,s,p,gnew) jt env
   where subProc = getSubRoute funcName jt
         params = getParams subProc
@@ -612,8 +651,13 @@ graphicsTranslator ((Call funcName args):rest) (c,s,p,g) jt env = graphicsTransl
 --testString = "(define foo '((to square (side)(repeat 4 (forward side) (right 90))) (square 50) (square 25) (square 5))))"
 -- testString = "(define foo '((to testsub (arg col) (make col 200) (color col) (forward arg)) (testsub 10 25)))"
 --testString = "(define foo '((forward (* 2 2))))"
-testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward (+ arg2 8)) (right 90) (forward (* arg2 arg1)) (right 90) (forward (* 2 5))) (testsub 1 2 3))))"
+--testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward (+ arg2 8)) (right 90) (forward (* arg2 arg1)) (right 90) (forward (* 2 5))) (testsub 1 2 3))))"
+testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (color (+ arg2 arg3)) (forward (+ arg2 8)) (right (* arg3 2)) (backward (* arg2 arg1)) (left (- 3 5)) (forward (* arg4 arg4))) (testsub 1 2 3 4))))"
 
+
+
+-- TODO Below does not work because of bug in replicate that needs to be fixed, try iterate?
+--testString = "(define starfish '((to starfish (side angle inc) (repeat 90 (forward side) (right angle) (make angle (+ angle inc)))) (penup) (forward 50) (pendown) (starfish 30 2 20)))))"
 
 
 (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
