@@ -344,8 +344,12 @@ getParams (params, ops) = [getvarstr $ unwrap var | var <- params]
 getSubRouteInst :: Subroutine -> [Instruction]
 getSubRouteInst (params, ops) = ops
 
-resolveArgs :: [Instruction] -> [Data]
-resolveArgs inst = [unwrap val | val <- inst]
+isVar :: Data -> Bool 
+isVar (Var _) = True
+isVar _     = False
+
+resolveArgs :: [Instruction] -> LocalEnv -> [Data]
+resolveArgs inst env = [if isVar v then resolveVar env (getvarstr v) else v | v <- [unwrap val | val <- inst]]
 
 -- -- To call function pass: zip vars values
 updateEnv :: [(String, Data)] -> LocalEnv -> LocalEnv
@@ -374,8 +378,10 @@ preprocessor :: Sexpr -> ([Instruction], JumpTable) -> ([Instruction], JumpTable
 preprocessor (Nil) (instStream, jt) = (instStream, jt)
 preprocessor (Cons (SexprInt val) Nil) (instStream, jt) = ((instStream ++ [NoOp (AGLfloat (fromIntegral val))]), jt)
 preprocessor (Cons (SexprFloat val) Nil) (instStream, jt) = ((instStream ++ [NoOp (AGLfloat val)]), jt)
+preprocessor (Cons (Symbol val) Nil) (instStream, jt) = ((instStream ++ [NoOp (Var val)], jt))
 preprocessor (Cons (SexprInt val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (AGLfloat (fromIntegral val))]), jt)
 preprocessor (Cons (SexprFloat val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (AGLfloat val)]), jt)
+preprocessor (Cons (Symbol val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (Var val)]), jt)
 preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Penup]),jt)
 preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Pendown]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (AGLfloat (fromIntegral i))]),jt)
@@ -395,6 +401,7 @@ preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) (instSt
 preprocessor (Cons (Cons (Symbol "color") (Cons (SexprFloat i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (AGLfloat i)]),jt)
 preprocessor (Cons (Cons (Symbol "color") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyColor $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRepeat (AInt i) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
+preprocessor (Cons (Cons (Symbol "repeat") (Cons (Symbol var) sexpr)) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyRepeat (Var var) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [SetXY (AInt i1) (AInt i2)]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprInt i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprFloat i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat i)]),jt)
@@ -610,6 +617,11 @@ graphicsTranslator ((MyLeft val):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslat
   where pnew = (updatePoint p "L" ((getval val) :: Float))
         gnew = g ++ [Paint c $ Bend (getval val)]
 
+graphicsTranslator ((MyRepeat (Var var) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,p,gnew,jt,env)
+  where  i = floor $ getval $ resolveVar env var
+         (_,_,_,_,_,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
+         gnew = g ++ gacc
+
 graphicsTranslator ((MyRepeat (AInt i) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,p,gnew,jt,env)
   where (_,_,_,_,_,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
         gnew = g ++ gacc
@@ -625,7 +637,7 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
   where subProc = getSubRoute funcName jt
         params = getParams subProc
         subProcInst = getSubRouteInst subProc
-        resolvedArgs = resolveArgs args
+        resolvedArgs = resolveArgs args env
         bindings = zip params resolvedArgs
         subProcEnv = updateEnv bindings []
         (_,_,_,_,_,gnew,_,_) = graphicsTranslator (subProcInst,[],c,s,p,g,jt,subProcEnv) 
@@ -661,7 +673,10 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
 
 
 -- TODO Below does not work because of bug in replicate that needs to be fixed, try iterate?
-testString = "(define starfish '((to starfish (side angle inc) (repeat 90 (forward side) (right angle) (make angle (+ angle inc)))) (penup) (forward 50) (pendown) (starfish 30 2 20)))))"
+--testString = "(define starfish '((to starfish (side angle inc) (repeat 90 (forward side) (right angle) (make angle (+ angle inc)))) (penup) (forward 50) (pendown) (starfish 30 2 20)))))"
+--testString = "(define stars'((to stars (side angle max) (repeat 5 (star side angle max 1))) (to star (side angle max count) (repeat max (forward (* side count)) (right angle) (make count (+ count 1))))(penup)(forward 50)(pendown)(stars 15 144 8)(penup)(backward 50)))"
+--testString = "(define foo '((repeat 5(forward 50)(right (/ 360 5)))))"
+testString = "(define foo '((to spiral(side angle max count)(repeat max(forward (* side count))(right angle)(make count (+ count 1))))(penup)(forward 70)(pendown)(spiral 0.05 10 180 0)))"
 
 
 (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
