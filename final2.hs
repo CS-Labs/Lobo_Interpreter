@@ -149,6 +149,7 @@ instance Monoid Box where
     Box xMin yMin xMax yMax `mappend` Box x0 y0 x1 y1 =
         Box (min x0 xMin) (min y0 yMin) (max x1 xMax) (max y1 yMax)
 
+
 forward :: GLfloat -> StateT Plumber (Writer Box) ()
 forward length = do
   move length 0
@@ -666,12 +667,12 @@ graphicsTranslator ((SetXY a b):rest,instcpy,c,s,p@(x,y,oldang),g,jt,env) = grap
 
 graphicsTranslator ((If (Conditional condsexpr) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env)
   where condResult = conditionalResolver condsexpr env
-        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (inst,[],c,s,p,g,jt,env) else ([],[],c,s,p,[],[],[])
+        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (inst,[],c,s,p,[],jt,env) else ([],[],c,s,p,[],[],[])
         gnew = g ++ gacc
 
 graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env)
   where condResult = conditionalResolver condsexpr env
-        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (ifinst,[],c,s,p,g,jt,env) else graphicsTranslator (elseinst,[],c,s,p,g,jt,env)
+        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (ifinst,[],c,s,p,[],jt,env) else graphicsTranslator (elseinst,[],c,s,p,g,jt,env)
         gnew = g ++ gacc
 
 graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env)
@@ -681,8 +682,8 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
         resolvedArgs = resolveArithArgs (resolveArgs args env) env
         bindings = zip params resolvedArgs
         subProcEnv = updateEnv bindings []
-        (_,_,cnew,snew,pnew,gnew,_,_) = graphicsTranslator (subProcInst,[],c,s,p,g,jt,subProcEnv) 
-
+        (_,_,cnew,snew,pnew,gacc,_,_) = graphicsTranslator (subProcInst,[],c,s,p,[],jt,subProcEnv) 
+        gnew = g ++ gacc
 
 
 -- When hitting a call
@@ -714,7 +715,7 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
 --testString = "(define foo '((to testsub (arg1) (if (> arg1 1) ((color 200) (forward 3))) (forward 10)) (testsub 3)))"
 
 --testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
-
+-- testString = "(define foo'((to bar (x)(if (> x 0)((forward x)(right 90)(bar (- x 4)))))(bar 40)))"
 testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0) ((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity))))(hilbert 10 2 1)))"
 
