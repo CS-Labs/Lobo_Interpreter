@@ -35,14 +35,21 @@ showCdr x = " . " ++ show x
 
 intNum = (do
   num <- many1 ((sat isDigit))
-  return (read num :: Int))
-
+  return (read num :: Int)) +++ (do
+    s <- char '-'
+    n <- many1 myDigit
+    return (read ([s] ++ n) :: Int))
 
 doubNum = (do
   x <- many1 (sat isDigit)
   y <- symb "."
   z <- many1 (sat isDigit)
-  return (read (x ++ y ++ z) :: Float))
+  return (read (x ++ y ++ z) :: Float)) +++ (do
+    s <- char '-'
+    x <- many1 (sat isDigit)
+    y <- symb "."
+    z <- many1 (sat isDigit)
+    return (read ([s] ++ x ++ y ++ z) :: Float))
 
 isMisc x = if x `elem` ['<', '>', '^', '+', '-', '*', '/', '=', '!'] then True else False
 
@@ -71,7 +78,7 @@ symbol = (do
   y <- token (many symbolic)
   return (x:y)) +++ quote
 
-a = (do {s <- symbol; return $ Symbol s}) +++ (do {n <- doubNum; return $ SexprFloat n}) +++ (do {n <- intNum; return $ SexprInt n})-- +++ (do {symb "\""; s <- test; symb "\""; return $ Symbol s})
+a = (do {n <- doubNum; return $ SexprFloat n}) +++ (do {n <- intNum; return $ SexprInt n}) +++ (do {s <- symbol; return $ Symbol s})-- +++ (do {symb "\""; s <- test; symb "\""; return $ Symbol s})
 
 s = (do {symb "("  +++ symb "\'("; symb ")"; return Nil}) +++ 
     a +++ 
@@ -296,6 +303,8 @@ type LocalEnv = [(String, Data)]
 
 type PenState = String
 
+type TS = String -- Translator state. 
+
 
 data Instruction = Penup 
                  | Pendown 
@@ -321,7 +330,7 @@ data Instruction = Penup
                  | MyAdd Data Data
                  | MySub Data Data deriving (Show)
 
-type GraphicsState =  ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv)
+type GraphicsState =  ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv, TS)
 
 
 type Subroutine =  ([Instruction], [Instruction])  -- Name [Variable Names] [Instruction stream]
@@ -388,6 +397,9 @@ updateEnvHelper var val env = if var `elem` [s | (s,v) <- env]
   then map (\(s,v) -> if s == var then (s, val) else (s,v)) env
   else [(var,val)] ++ env
 
+isOn :: String -> Bool
+isOn "on" = True
+isOn "off" = False
 
 getAngle :: Floating a => (a, a, a) -> (a, a) -> a
 getAngle (x0,y0,a) (x,y) = (radToDeg (atan((y-y0)/(x-x0)))) - a
@@ -411,6 +423,7 @@ preprocessor (Cons (SexprFloat val) rest) (instStream, jt) = preprocessor rest (
 preprocessor (Cons (Symbol val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (Var val)]), jt)
 preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Penup]),jt)
 preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Pendown]),jt)
+preprocessor (Cons (Cons (Symbol "stop") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Stop]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (Var var)]),jt)
 preprocessor (Cons (Cons (Symbol "forward") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Forward $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
@@ -489,11 +502,11 @@ test (Cons (Cons (Symbol fCall) sexpr) rest) = sexpr
 --         inst = (if (isNil c) then [If cond ifinst] else [IfElse cond ifinst (stripJumpTable $ preprocessor (Cons c Nil) ([],[]))])
 
 getGraphicInstStream :: GraphicsState-> [Graphic]
-getGraphicInstStream (_,_,_,_,_,graphicInstStream,_,_) = graphicInstStream
+getGraphicInstStream (_,_,_,_,_,graphicInstStream,_,_,_) = graphicInstStream
 
 
-dup :: ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv) -> ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv)
-dup (a,b,c,d,e,f,g,h) = (b,b,c,d,e,f,g,h)
+dup :: ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv, TS) -> ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv,TS)
+dup (a,b,c,d,e,f,g,h,i) = (b,b,c,d,e,f,g,h,i)
 
 
 -- For nested arithmetic expressions try calling solver recursively.
@@ -573,116 +586,142 @@ conditionalResolver (Cons (Symbol "=") (Cons (Symbol s1) (Cons (Symbol s2) Nil))
         f2 = getval $ resolveVar env s2
 
 graphicsTranslator :: GraphicsState -> GraphicsState
-graphicsTranslator ([],instcpy,c,s,p,g,jt,env) = ([],instcpy,c,s,p,g,jt,env)
-graphicsTranslator (((MyColor (Var var)):rest),instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,s,p,g,jt,env)
+graphicsTranslator ([],instcpy,c,s,p,g,jt,env,vs) = ([],instcpy,c,s,p,g,jt,env,vs)
+graphicsTranslator ((Stop:rest),instcpy,c,s,p,g,jt,env,vs) = ([],instcpy,c,s,p,g,jt,env,"off")
+graphicsTranslator (((MyColor (Var var)):rest),instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,cnew,s,p,g,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ resolveVar env var
         cnew = hueToRGB val
 
-graphicsTranslator (((MyColor (Arithmetic arithSexpr)):rest),instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,s,p,g,jt,env)
+graphicsTranslator (((MyColor (Arithmetic arithSexpr)):rest),instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,cnew,s,p,g,jt,env,vs) else ([],instcpy,cnew,s,p,g,jt,env,vs)
   where val = getval $ arithmeticSolver arithSexpr env
         cnew = hueToRGB val
 
-graphicsTranslator (((MyColor val):rest),instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy, hueToRGB (getval val),s,p,g,jt,env)
-graphicsTranslator (Penup:rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,"up",p,g,jt,env)
-graphicsTranslator (Pendown:rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,"down",p,g,jt,env)
+graphicsTranslator (((MyColor val):rest),instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy, hueToRGB (getval val),s,p,g,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
 
-graphicsTranslator ((Make var (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,p,g,jt,updatedEnv)
+graphicsTranslator (Penup:rest,instcpy,c,s,p,g,jt,env,vs) = graphicsTranslator (rest,instcpy,c,"up",p,g,jt,env,vs)
+
+graphicsTranslator (Pendown:rest,instcpy,c,s,p,g,jt,env,vs) = graphicsTranslator (rest,instcpy,c,"down",p,g,jt,env,vs)
+
+graphicsTranslator ((Make var (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,p,g,jt,updatedEnv,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = arithmeticSolver arithSexpr env
         updatedEnv = updateEnv [(var,val)] env
 
-graphicsTranslator ((Make var val):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,p,g,jt,updatedEnv)
+graphicsTranslator ((Make var val):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,p,g,jt,updatedEnv,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where updatedEnv = updateEnv [(var,val)] env
 
-graphicsTranslator ((Forward (Var var)):rest,instcpy,c,s,p,g,jt,env) =  graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((Forward (Var var)):rest,instcpy,c,s,p,g,jt,env,vs) =  
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "F" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
 
-graphicsTranslator ((Forward (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env) =  graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((Forward (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env,vs) =  
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ arithmeticSolver arithSexpr env
         pnew = (updatePoint p "F" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
 
-graphicsTranslator ((Forward val):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((Forward val):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where pnew = (updatePoint p "F" ((getval val) :: Float))
         gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))]
 
-graphicsTranslator ((Backward (Var var)):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((Backward (Var var)):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "B" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
 
-graphicsTranslator ((Backward (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((Backward (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ arithmeticSolver arithSexpr env
         pnew = (updatePoint p "B" val)
         gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
 
-graphicsTranslator ((Backward val):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((Backward val):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where pnew = (updatePoint p "B" ((getval val) :: Float))
         gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))]
 
-graphicsTranslator ((MyRight (Var var)):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((MyRight (Var var)):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "R" val)
         gnew = g ++ [Paint c $ Bend (-val)]
 
-graphicsTranslator ((MyRight (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((MyRight (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ arithmeticSolver arithSexpr env
         pnew = (updatePoint p "R" val)
         gnew = g ++ [Paint c $ Bend (-val)]
 
-graphicsTranslator ((MyRight val):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env) 
+graphicsTranslator ((MyRight val):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs)  else ([],instcpy,c,s,p,g,jt,env,vs)
   where pnew = (updatePoint p "R" ((getval val) :: Float))
         gnew = g ++ [Paint c $ Bend (-(getval val))]
 
-graphicsTranslator ((MyLeft (Var var)):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((MyLeft (Var var)):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([], instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ resolveVar env var
         pnew = (updatePoint p "L" val)
         gnew = g ++ [Paint c $ Bend val]
 
-graphicsTranslator ((MyLeft (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((MyLeft (Arithmetic arithSexpr)):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where val = getval $ arithmeticSolver arithSexpr env
         pnew = (updatePoint p "L" val)
         gnew = g ++ [Paint c $ Bend val]
 
-graphicsTranslator ((MyLeft val):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((MyLeft val):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where pnew = (updatePoint p "L" ((getval val) :: Float))
         gnew = g ++ [Paint c $ Bend (getval val)]
 
-graphicsTranslator ((MyRepeat (Var var) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env)
+graphicsTranslator ((MyRepeat (Var var) inst):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where  i = floor $ getval $ resolveVar env var
-         (_,_,cnew,snew,pnew,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
+         (_,_,cnew,snew,pnew,gacc,_,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env,vs) !! i  -- Take the ith iteration. 
          gnew = g ++ gacc
 
-graphicsTranslator ((MyRepeat (AInt i) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env)
-  where (_,_,cnew,snew,pnew,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
+graphicsTranslator ((MyRepeat (AInt i) inst):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
+  where (_,_,cnew,snew,pnew,gacc,_,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env,vs) !! i  -- Take the ith iteration. 
         gnew = g ++ gacc
 
-graphicsTranslator ((SetXY a b):rest,instcpy,c,s,p@(x,y,oldang),g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
+graphicsTranslator ((SetXY a b):rest,instcpy,c,s,p@(x,y,oldang),g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where fltpnt = ((fromIntegral (getintval a)),(fromIntegral (getintval b)))
         ang = getAngle p fltpnt
         dist = getDist p fltpnt
         gnew = g ++ [(Bend $ ang), (if s == "down" then Straight dist else Invisible dist), (Bend $ -ang)]
         pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
 
-graphicsTranslator ((If (Conditional condsexpr) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env)
+graphicsTranslator ((If (Conditional condsexpr) inst):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where condResult = conditionalResolver condsexpr env
-        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (inst,[],c,s,p,[],jt,env) else ([],[],c,s,p,[],[],[])
+        (_,_,cnew,snew,pnew,gacc,_,_,_) = if condResult then graphicsTranslator (inst,[],c,s,p,[],jt,env,vs) else ([],[],c,s,p,[],[],[],[])
         gnew = g ++ gacc
 
-graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env)
+graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where condResult = conditionalResolver condsexpr env
-        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (ifinst,[],c,s,p,[],jt,env) else graphicsTranslator (elseinst,[],c,s,p,g,jt,env)
+        (_,_,cnew,snew,pnew,gacc,_,_,_) = if condResult then graphicsTranslator (ifinst,[],c,s,p,[],jt,env,vs) else graphicsTranslator (elseinst,[],c,s,p,g,jt,env,vs)
         gnew = g ++ gacc
 
-graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env)
+graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env,vs) = 
+  if isOn vs then graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
   where subProc = getSubRoute funcName jt
         params = getParams subProc
         subProcInst = getSubRouteInst subProc
         resolvedArgs = resolveArithArgs (resolveArgs args env) env
         bindings = zip params resolvedArgs
         subProcEnv = updateEnv bindings []
-        (_,_,cnew,snew,pnew,gacc,_,_) = graphicsTranslator (subProcInst,[],c,s,p,[],jt,subProcEnv) 
+        (_,_,cnew,snew,pnew,gacc,_,_,_) = graphicsTranslator (subProcInst,[],c,s,p,[],jt,subProcEnv,vs) 
         gnew = g ++ gacc
 
 
@@ -716,23 +755,24 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
 
 --testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
 -- testString = "(define foo'((to bar (x)(if (> x 0)((forward x)(right 90)(bar (- x 4)))))(bar 40)))"
-testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
+--testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0) ((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity))))(hilbert 10 2 1)))"
 
 --testString = "(define foo '((to testsub (a b c) (if (> b 1) ((testsub 1 (- b 1) (- c 1)) (forward c) (right 5) (testsub 1 (- b 1) (- c 1))))) (testsub 1 5 9)))"
 
--- TODO Below does not work because of bug in replicate that needs to be fixed, try iterate?
 --testString = "(define starfish '((to starfish (side angle inc) (repeat 90 (forward side) (right angle) (make angle (+ angle inc)))) (penup) (forward 50) (pendown) (starfish 30 2 20)))))"
 --testString = "(define stars'((to stars (side angle max) (repeat 5 (star side angle max 1))) (to star (side angle max count) (repeat max (forward (* side count)) (right angle) (make count (+ count 1))))(penup)(forward 50)(pendown)(stars 15 144 8)(penup)(backward 50)))"
---testString = "(define foo '((repeat 5(forward 50)(right (/ 360 5)))))"
+testString = "(define foo '((repeat 5(forward 50) (stop) (right (/ 360 5)))))"
 --testString = "(define foo '((to spiral(side angle max count)(repeat max(forward (* side count))(right angle)(make count (+ count 1))))(penup)(forward 70)(pendown)(spiral 0.05 10 180 0)))"
 
 --testString = "(define foo '((if (= 1 n) ((forward 10) (penup)))))"
 --testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5 (repeat 8 (make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
 
+--testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
+
 (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
-debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (debugGetInstStream,[],white,"down",(0.0,0.0,0.0),[],debugJt,[]))))
+debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (debugGetInstStream,[],white,"down",(0.0,0.0,0.0),[],debugJt,[],"on"))))
     where (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
 
@@ -740,7 +780,7 @@ main = do
   (progname, _) <- getArgsAndInitialize
   createWindow "Haskell Plumbing Graphics"
   let (instructionStream, jt) = (preprocessor (stripHeader $ p testString) ([],[]))
-  let graphicsInstructionStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (instructionStream,[], white,"down",(0.0,0.0,0.0),[],jt,[]))))
+  let graphicsInstructionStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (instructionStream,[], white,"down",(0.0,0.0,0.0),[],jt,[],"on"))))
   wrappedInstStream <- newIORef graphicsInstructionStream
   displayCallback $= display wrappedInstStream
   actionOnWindowClose $= MainLoopReturns
