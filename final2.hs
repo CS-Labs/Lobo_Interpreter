@@ -15,7 +15,7 @@ import Control.Monad.State hiding (join)
 import Control.Monad.Writer hiding (join)
 import Control.Monad.Trans hiding (join)
 
-data Sexpr = Symbol String | SexprInt Int | SexprFloat Float | Nil | Cons Sexpr Sexpr
+data Sexpr = Symbol String | SexprInt Int | SexprFloat Float | Nil | Cons {car :: Sexpr, cdr :: Sexpr} 
 
 
 instance Show Sexpr where
@@ -278,7 +278,17 @@ data Expression = MyGT Data Data
                 | LTE Data Data
                 | GTE Data Data deriving (Show)
 
-data Data = AGLfloat {getval :: GLfloat} | AInt {getintval :: Int} | ABool Bool | AFloat Float | AString {getstrval :: String} | DList [Data] | VarList [(String, Data)] | Var {getvarstr :: String}  | Expression | Arithmetic Sexpr deriving (Show)
+data Data = AGLfloat {getval :: GLfloat} 
+          | AInt {getintval :: Int} 
+          | ABool Bool 
+          | AFloat Float 
+          | AString {getstrval :: String} 
+          | DList [Data] 
+          | VarList [(String, Data)] 
+          | Var {getvarstr :: String}  
+          | Expression 
+          | Arithmetic {getsexpr :: Sexpr}
+          | Conditional Sexpr deriving (Show)
 
 --data LocalEnv = LocalEnv {getFuncName :: String, getLocalEnv :: [Data]} deriving (Show)
 type LocalEnv = [(String, Data)]
@@ -301,9 +311,10 @@ data Instruction = Penup
                  | MyRepeat Data [Instruction] -- Action
                  | Make String Data
                  | Call String [Instruction]-- Call Subroutine
-                 | If Expression [Instruction] -- Action
-                 | IfElse Expression [Instruction] [Instruction] -- Action Action
+                 | If Data [Instruction] -- Action
+                 | IfElse Data [Instruction] [Instruction] -- Action Action
                  | ArithWrapper {getexpr :: Data} 
+                 | CondWrapper {getcond :: Data}
                  | MyMul Data Data
                  | MyDiv Data Data
                  | MyAdd Data Data
@@ -348,8 +359,23 @@ isVar :: Data -> Bool
 isVar (Var _) = True
 isVar _     = False
 
+isArith :: Data -> Bool
+isArith  (Arithmetic _) = True
+isArith _ = False
+
+isNoOp :: Instruction -> Bool
+isNoOp (NoOp _) = True
+isNoOp _ = False
+
+isNil :: Sexpr -> Bool
+isNil (Nil) = True
+isNil _ = False
+
 resolveArgs :: [Instruction] -> LocalEnv -> [Data]
-resolveArgs inst env = [if isVar v then resolveVar env (getvarstr v) else v | v <- [unwrap val | val <- inst]]
+resolveArgs inst env = [if isVar v then resolveVar env (getvarstr v) else v | v <- [if isNoOp val then unwrap val else getexpr val | val <- inst]]
+
+resolveArithArgs :: [Data] -> LocalEnv -> [Data]
+resolveArithArgs args env = [if isArith arg then arithmeticSolver (getsexpr arg) env else arg | arg <- args]
 
 -- -- To call function pass: zip vars values
 updateEnv :: [(String, Data)] -> LocalEnv -> LocalEnv
@@ -406,8 +432,16 @@ preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprInt i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprFloat i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat i)]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) arithSexpr)) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
+preprocessor (Cons (Cons (Symbol "if") sexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ inst), jt) 
+  where a = car sexpr
+        b = car $ cdr sexpr
+        c = cdr $ cdr sexpr
+        cond = getcond $ head $ stripJumpTable $ preprocessor (Cons a Nil) ([],jt)
+        ifinst = stripJumpTable $ preprocessor (Cons b Nil) ([],jt)
+        inst = (if (isNil c) then [If cond ifinst] else [IfElse cond ifinst (stripJumpTable $ preprocessor (Cons c Nil) ([],jt))])
 
 -- Sub routines --
+---TODO I just realized this can be converted to one line that takes a variable amount of arguments like call; do later. 
 preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) Nil) sexpr))) rest) (instStream, jt) = preprocessor rest (instStream, updatedJt)
   where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
         params = [NoOp (Var arg1)]
@@ -425,67 +459,33 @@ preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symb
         params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3), NoOp (Var arg4)]
         updatedJt = jt ++ [(funcName, (params, subroute))]
 
---if else with variable and int
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AInt d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
---if else with variable and double
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
---if else with 2 variables
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) (Cons sexpr1 (Cons sexpr2 Nil)))) rest) (instStream, jt)  = 
-  preprocessor rest ((instStream ++ [IfElse (MyEQ (Var d1) (Var d2)) (stripJumpTable $ preprocessor (Cons sexpr1 Nil) ([],jt)) (stripJumpTable $ preprocessor (Cons sexpr2 Nil) ([],jt))]),jt)
-
---if with variable and int
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyEQ (Var d1) (AInt d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyLT (Var d1) (AInt d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyGT (Var d1) (AInt d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (LTE (Var d1) (AInt d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprInt d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (GTE (Var d1) (AInt d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
---if with 2 variables
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyEQ (Var d1) (Var d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyLT (Var d1) (Var d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyGT (Var d1) (Var d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (LTE (Var d1) (Var d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (Symbol d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (GTE (Var d1) (Var d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
---if with variable and double
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "=") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyEQ (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyLT (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (MyGT (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol "<=") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (LTE (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") (Cons (Cons (Symbol ">=") (Cons (Symbol d1) (Cons (SexprFloat d2) Nil))) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [If (GTE (Var d1) (AFloat d2)) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-
 --arithmetic
 preprocessor (Cons (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $Arithmetic (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
 preprocessor (Cons (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
 preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol "-") (Cons sexpr Nil)) rest) (instStream,jt) = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "-") (Cons (SexprFloat 0.0) (Cons sexpr Nil)))]),jt)
+
+--conditionals
+preprocessor (Cons (Cons (Symbol "<") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [CondWrapper $ Conditional (Cons (Symbol "<") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol ">") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [CondWrapper $ Conditional (Cons (Symbol ">") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+preprocessor (Cons (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [CondWrapper $ Conditional (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
 
 -- Any non-matched symbols should be function calls. 
 preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Call fCall (stripJumpTable $ preprocessor sexpr ([], jt))]) ,jt)
+
+-- Triple nested cons are reduced by one level.
+preprocessor (Cons rest nil) (instStream, jt) = preprocessor rest (instStream,jt)  
+
+test (Cons (Cons (Symbol fCall) sexpr) rest) = sexpr
+
+-- test (Cons (Cons (Symbol "if") sexpr) rest) (test,jt) = (inst,jt)
+--   where a = car sexpr
+--         b = car $ cdr sexpr
+--         c = cdr $ cdr sexpr
+--         cond = getcond $ head $ stripJumpTable $ preprocessor (Cons a Nil) ([],[])
+--         ifinst = stripJumpTable $ preprocessor (Cons b Nil) ([],[])
+--         inst = (if (isNil c) then [If cond ifinst] else [IfElse cond ifinst (stripJumpTable $ preprocessor (Cons c Nil) ([],[]))])
 
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (_,_,_,_,_,graphicInstStream,_,_) = graphicInstStream
@@ -526,6 +526,7 @@ arithmeticSolver (Cons (Symbol "-") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil)
 arithmeticSolver (Cons (Symbol "*") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1*f2)
 arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1/f2)
 
+
 arithmeticSolver (Cons (Symbol "+") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1+i2)
   where i1 = getval $ resolveVar env s1
         i2 = getval $ resolveVar env s2
@@ -539,6 +540,36 @@ arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) e
   where i1 = getval $ resolveVar env s1
         i2 = getval $ resolveVar env s2
 
+
+
+--TODO; same as above there probably is a more consise way to do this.
+conditionalResolver :: Sexpr -> LocalEnv -> Bool
+
+conditionalResolver (Cons (Symbol "<") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in f1 < f2
+conditionalResolver (Cons (Symbol ">") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in f1 > f2
+conditionalResolver (Cons (Symbol "=") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in f1 == f2
+
+conditionalResolver (Cons (Symbol "<") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in i1 < (fromIntegral i2)
+conditionalResolver (Cons (Symbol ">") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in i1 > (fromIntegral i2)
+conditionalResolver (Cons (Symbol "=") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in i1 == (fromIntegral i2)
+
+conditionalResolver (Cons (Symbol "<") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in f1 < f2
+conditionalResolver (Cons (Symbol ">") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in f1 > f2
+conditionalResolver (Cons (Symbol "=") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in f1 == f2
+
+conditionalResolver (Cons (Symbol "<") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in (fromIntegral i1) < i2
+conditionalResolver (Cons (Symbol ">") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in (fromIntegral i1) > i2
+conditionalResolver (Cons (Symbol "=") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in (fromIntegral i1) == i2
+
+conditionalResolver (Cons (Symbol "<") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = f1 < f2
+  where f1 = getval $ resolveVar env s1
+        f2 = getval $ resolveVar env s2
+conditionalResolver (Cons (Symbol ">") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = f1 > f2
+  where f1 = getval $ resolveVar env s1
+        f2 = getval $ resolveVar env s2
+conditionalResolver (Cons (Symbol "=") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = f1 == f2
+  where f1 = getval $ resolveVar env s1
+        f2 = getval $ resolveVar env s2
 
 graphicsTranslator :: GraphicsState -> GraphicsState
 graphicsTranslator ([],instcpy,c,s,p,g,jt,env) = ([],instcpy,c,s,p,g,jt,env)
@@ -617,13 +648,13 @@ graphicsTranslator ((MyLeft val):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslat
   where pnew = (updatePoint p "L" ((getval val) :: Float))
         gnew = g ++ [Paint c $ Bend (getval val)]
 
-graphicsTranslator ((MyRepeat (Var var) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,p,gnew,jt,env)
+graphicsTranslator ((MyRepeat (Var var) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env)
   where  i = floor $ getval $ resolveVar env var
-         (_,_,_,_,_,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
+         (_,_,cnew,snew,pnew,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
          gnew = g ++ gacc
 
-graphicsTranslator ((MyRepeat (AInt i) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,p,gnew,jt,env)
-  where (_,_,_,_,_,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
+graphicsTranslator ((MyRepeat (AInt i) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env)
+  where (_,_,cnew,snew,pnew,gacc,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,c,s,p,[],jt,env) !! i  -- Take the ith iteration. 
         gnew = g ++ gacc
 
 graphicsTranslator ((SetXY a b):rest,instcpy,c,s,p@(x,y,oldang),g,jt,env) = graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env)
@@ -633,14 +664,24 @@ graphicsTranslator ((SetXY a b):rest,instcpy,c,s,p@(x,y,oldang),g,jt,env) = grap
         gnew = g ++ [(Bend $ ang), (if s == "down" then Straight dist else Invisible dist), (Bend $ -ang)]
         pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
 
-graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,c,s,p,gnew,jt,env)
+graphicsTranslator ((If (Conditional condsexpr) inst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env)
+  where condResult = conditionalResolver condsexpr env
+        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (inst,[],c,s,p,g,jt,env) else ([],[],c,s,p,[],[],[])
+        gnew = g ++ gacc
+
+graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env)
+  where condResult = conditionalResolver condsexpr env
+        (_,_,cnew,snew,pnew,gacc,_,_) = if condResult then graphicsTranslator (ifinst,[],c,s,p,g,jt,env) else graphicsTranslator (elseinst,[],c,s,p,g,jt,env)
+        gnew = g ++ gacc
+
+graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphicsTranslator (rest,instcpy,cnew,snew,pnew,gnew,jt,env)
   where subProc = getSubRoute funcName jt
         params = getParams subProc
         subProcInst = getSubRouteInst subProc
-        resolvedArgs = resolveArgs args env
+        resolvedArgs = resolveArithArgs (resolveArgs args env) env
         bindings = zip params resolvedArgs
         subProcEnv = updateEnv bindings []
-        (_,_,_,_,_,gnew,_,_) = graphicsTranslator (subProcInst,[],c,s,p,g,jt,subProcEnv) 
+        (_,_,cnew,snew,pnew,gnew,_,_) = graphicsTranslator (subProcInst,[],c,s,p,g,jt,subProcEnv) 
 
 
 
@@ -657,7 +698,7 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
 -- testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
 --testString = "(define foo '((forward 10) (if (>= n 5.5) (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100)))))"
 --testString = "(define foo '((right 30) (color 60) (forward 100) (right 120) (color 300) (forward 100) (right 120) (color 180) (forward 80)))"
---testString = "(define foo '((repeat 10 (penup) (forward 5) (pendown) (forward 5))))"
+--testString = "(define foo '((repeat 3 (penup) (forward 5) (pendown) (forward 5))))"
  --testString = "(define foo '((repeat 4 (forward 5) (right 90)) (repeat 4 (forward 2) (right 90)))))"
 --testString = "(define foo '((forward 10) (penup) (setxy 20 20) (pendown) (forward 10) (right 135) (forward 10)))"
 -- testString = "(define foo '((+ 1 (+1 2))))"
@@ -670,14 +711,23 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
 --testString = "(define foo '((forward (* 2 2))))"
 --testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward (+ arg2 8)) (right 90) (forward (* arg2 arg1)) (right 90) (forward (* 2 5))) (testsub 1 2 3))))"
 --testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (color (+ arg2 arg3)) (forward (+ arg2 8)) (right (* arg3 2)) (backward (* arg2 arg1)) (left (- 3 5)) (forward (* arg4 arg4))) (testsub 1 2 3 4))))"
+--testString = "(define foo '((to testsub (arg1) (if (> arg1 1) ((color 200) (forward 3))) (forward 10)) (testsub 3)))"
 
+--testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
+
+testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
+--testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0) ((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity))))(hilbert 10 2 1)))"
+
+--testString = "(define foo '((to testsub (a b c) (if (> b 1) ((testsub 1 (- b 1) (- c 1)) (forward c) (right 5) (testsub 1 (- b 1) (- c 1))))) (testsub 1 5 9)))"
 
 -- TODO Below does not work because of bug in replicate that needs to be fixed, try iterate?
 --testString = "(define starfish '((to starfish (side angle inc) (repeat 90 (forward side) (right angle) (make angle (+ angle inc)))) (penup) (forward 50) (pendown) (starfish 30 2 20)))))"
 --testString = "(define stars'((to stars (side angle max) (repeat 5 (star side angle max 1))) (to star (side angle max count) (repeat max (forward (* side count)) (right angle) (make count (+ count 1))))(penup)(forward 50)(pendown)(stars 15 144 8)(penup)(backward 50)))"
 --testString = "(define foo '((repeat 5(forward 50)(right (/ 360 5)))))"
-testString = "(define foo '((to spiral(side angle max count)(repeat max(forward (* side count))(right angle)(make count (+ count 1))))(penup)(forward 70)(pendown)(spiral 0.05 10 180 0)))"
+--testString = "(define foo '((to spiral(side angle max count)(repeat max(forward (* side count))(right angle)(make count (+ count 1))))(penup)(forward 70)(pendown)(spiral 0.05 10 180 0)))"
 
+--testString = "(define foo '((if (= 1 n) ((forward 10) (penup)))))"
+--testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5 (repeat 8 (make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
 
 (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
@@ -698,7 +748,7 @@ main = do
 display is = do
   clear [ColorBuffer]
   graphicInstStream <- readIORef is
-  putStr $ show graphicInstStream
+  putStrLn $ show $ length graphicInstStream
   draw $ (myJoin graphicInstStream)
   flush
 
