@@ -15,7 +15,7 @@ import Control.Monad.State hiding (join)
 import Control.Monad.Writer hiding (join)
 import Control.Monad.Trans hiding (join)
 
-data Sexpr = Symbol String | SexprInt Int | SexprFloat Float | Nil | Cons {car :: Sexpr, cdr :: Sexpr} 
+data Sexpr = Symbol String | SexprInt {getsint :: Int} | SexprFloat {getsfloat :: Float} | Nil | Cons {car :: Sexpr, cdr :: Sexpr} 
 
 
 instance Show Sexpr where
@@ -413,6 +413,24 @@ stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexp
 stripJumpTable :: ([Instruction], JumpTable) -> [Instruction]
 stripJumpTable (inst,jt) = inst
 
+setxyHelper :: Sexpr -> String -> Data
+setxyHelper s "i" = (AGLfloat (fromIntegral $ getsint s))
+setxyHelper s "f" = (AGLfloat (getsfloat s))
+setxyHelper s "a" = getexpr $ head (stripJumpTable $ preprocessor (Cons s Nil) ([],[]))
+
+myt = "((setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100)))"
+
+mytest (Cons (Cons (Symbol "setxy") arithSexpr) rest)  = inst
+  where first = car arithSexpr
+        second = car $ cdr arithSexpr
+        temp1 = if elem ')' (show first) then "a" else "i"
+        temp2 = if elem ')' (show second) then "a" else "i"
+        type1 = if elem '.' (show first) && temp1 == "i" then "f" else temp1
+        type2 = if elem '.' (show second) && temp2 == "i" then "f" else temp2
+        inst = [SetXY (setxyHelper (Cons first Nil) type1) (setxyHelper (Cons second Nil) type2)]
+
+
+
 preprocessor :: Sexpr -> ([Instruction], JumpTable) -> ([Instruction], JumpTable)
 preprocessor (Nil) (instStream, jt) = (instStream, jt)
 preprocessor (Cons (SexprInt val) Nil) (instStream, jt) = ((instStream ++ [NoOp (AGLfloat (fromIntegral val))]), jt)
@@ -420,7 +438,6 @@ preprocessor (Cons (SexprFloat val) Nil) (instStream, jt) = ((instStream ++ [NoO
 preprocessor (Cons (Symbol val) Nil) (instStream, jt) = ((instStream ++ [NoOp (Var val)], jt))
 preprocessor (Cons (SexprInt val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (AGLfloat (fromIntegral val))]), jt)
 preprocessor (Cons (SexprFloat val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (AGLfloat val)]), jt)
-preprocessor (Cons (Symbol val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (Var val)]), jt)
 preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Penup]),jt)
 preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Pendown]),jt)
 preprocessor (Cons (Cons (Symbol "stop") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Stop]),jt)
@@ -442,7 +459,15 @@ preprocessor (Cons (Cons (Symbol "color") (Cons (SexprFloat i) Nil)) rest) (inst
 preprocessor (Cons (Cons (Symbol "color") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyColor $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRepeat (AInt i) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
 preprocessor (Cons (Cons (Symbol "repeat") (Cons (Symbol var) sexpr)) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyRepeat (Var var) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "setxy") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [SetXY (AInt i1) (AInt i2)]),jt)
+preprocessor (Cons (Cons (Symbol "setxy") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ inst),jt)
+  where first = car arithSexpr
+        second = car $ cdr arithSexpr
+        temp1 = if elem ')' (show first) then "a" else "i"
+        temp2 = if elem ')' (show second) then "a" else "i"
+        type1 = if elem '.' (show first) && temp1 == "i" then "f" else temp1
+        type2 = if elem '.' (show second) && temp2 == "i" then "f" else temp2
+        inst = [SetXY (setxyHelper first type1) (setxyHelper second type2)]
+
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprInt i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat (fromIntegral i))]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprFloat i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat i)]),jt)
 preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) arithSexpr)) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
@@ -488,6 +513,9 @@ preprocessor (Cons (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (in
 -- Any non-matched symbols should be function calls. 
 preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Call fCall (stripJumpTable $ preprocessor sexpr ([], jt))]) ,jt)
 
+-- Params to functions. 
+preprocessor (Cons (Symbol val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (Var val)]), jt)
+
 -- Triple nested cons are reduced by one level.
 preprocessor (Cons rest nil) (instStream, jt) = preprocessor rest (instStream,jt)  
 
@@ -504,94 +532,30 @@ test (Cons (Cons (Symbol fCall) sexpr) rest) = sexpr
 getGraphicInstStream :: GraphicsState-> [Graphic]
 getGraphicInstStream (_,_,_,_,_,graphicInstStream,_,_,_) = graphicInstStream
 
-
 dup :: ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv, TS) -> ([Instruction], [Instruction], ColorTriple, PenState, (Float,Float,Float), [Graphic], JumpTable, LocalEnv,TS)
 dup (a,b,c,d,e,f,g,h,i) = (b,b,c,d,e,f,g,h,i)
-
-
--- For nested arithmetic expressions try calling solver recursively.
--- TODO; there is probably a more concise way to do this
--- arithmeticSolver :: Sexpr -> LocalEnv -> Data
--- -- Given Just constants.
--- arithmeticSolver (Cons (Symbol "+") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat (fromIntegral (i1+i2)))
--- arithmeticSolver (Cons (Symbol "-") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat (fromIntegral (i1-i2)))
--- arithmeticSolver (Cons (Symbol "*") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat (fromIntegral (i1*i2)))
--- arithmeticSolver (Cons (Symbol "/") (Cons (SexprInt i1) (Cons (SexprInt i2) Nil))) env = (AGLfloat  ((fromIntegral i1)/(fromIntegral i2)))
--- arithmeticSolver (Cons (Symbol "+") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1+f2))
--- arithmeticSolver (Cons (Symbol "-") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1-f2))
--- arithmeticSolver (Cons (Symbol "*") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1*f2))
--- arithmeticSolver (Cons (Symbol "/") (Cons (SexprFloat f1) (Cons (SexprFloat f2) Nil))) env = (AGLfloat (f1/f2))
--- -- With variables.
--- arithmeticSolver (Cons (Symbol "+") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1) +i2)
--- arithmeticSolver (Cons (Symbol "-") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1)-i2)
--- arithmeticSolver (Cons (Symbol "*") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1)*i2)
--- arithmeticSolver (Cons (Symbol "/") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in AGLfloat((fromIntegral i1)/i2)
--- arithmeticSolver (Cons (Symbol "+") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1+f2)
--- arithmeticSolver (Cons (Symbol "-") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1-f2)
--- arithmeticSolver (Cons (Symbol "*") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1*f2)
--- arithmeticSolver (Cons (Symbol "/") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in AGLfloat(f1/f2)
-
--- arithmeticSolver (Cons (Symbol "+") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 + (fromIntegral i2))
--- arithmeticSolver (Cons (Symbol "-") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 - (fromIntegral i2))
--- arithmeticSolver (Cons (Symbol "*") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 * (fromIntegral i2))
--- arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in AGLfloat(i1 / (fromIntegral i2))
--- arithmeticSolver (Cons (Symbol "+") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1+f2)
--- arithmeticSolver (Cons (Symbol "-") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1-f2)
--- arithmeticSolver (Cons (Symbol "*") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1*f2)
--- arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in AGLfloat(f1/f2)
-
-
--- arithmeticSolver (Cons (Symbol "+") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1+i2)
---   where i1 = getval $ resolveVar env s1
---         i2 = getval $ resolveVar env s2
--- arithmeticSolver (Cons (Symbol "-") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1-i2)
---   where i1 = getval $ resolveVar env s1
---         i2 = getval $ resolveVar env s2
--- arithmeticSolver (Cons (Symbol "*") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1*i2)
---   where i1 = getval $ resolveVar env s1
---         i2 = getval $ resolveVar env s2
--- arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = AGLfloat(i1/i2)
---   where i1 = getval $ resolveVar env s1
---         i2 = getval $ resolveVar env s2
-
 
 arithmeticSolver (Cons (Symbol "+") (Cons s1 (Cons s2 Nil))) env = (+) (arithmeticSolver s1 env) (arithmeticSolver s2 env) 
 arithmeticSolver (Cons (Symbol "*") (Cons s1 (Cons s2 Nil))) env = (*) (arithmeticSolver s1 env) (arithmeticSolver s2 env) 
 arithmeticSolver (Cons (Symbol "-") (Cons s1 (Cons s2 Nil))) env = (-) (arithmeticSolver s1 env) (arithmeticSolver s2 env) 
-arithmeticSolver (Cons (Symbol "/") (Cons s1 (Cons s2 Nil))) env = (/) (arithmeticSolver s1 env) (arithmeticSolver s2 env) 
+arithmeticSolver (Cons (Symbol "/") (Cons s1 (Cons s2 Nil))) env = (/) (arithmeticSolver s1 env) (arithmeticSolver s2 env)
+arithmeticSolver (Cons (Symbol "sin") (Cons s Nil)) env = sin (arithmeticSolver s env)
+arithmeticSolver (Cons (Symbol "cos") (Cons s Nil)) env = cos (arithmeticSolver s env)
+arithmeticSolver (Cons (Symbol "sqrt") (Cons s Nil)) env = sqrt (arithmeticSolver s env)
 arithmeticSolver (SexprInt n) env = fromIntegral n
 arithmeticSolver (SexprFloat n) env = n
 arithmeticSolver (Symbol s) env = getval $ resolveVar env s
 
-
---TODO; same as above there probably is a more consise way to do this.
 conditionalResolver :: Sexpr -> LocalEnv -> Bool
+conditionalResolver (Cons (Symbol "<") (Cons s1 (Cons s2 Nil))) env = (<) (condHelper s1 env) (condHelper s2 env)
+conditionalResolver (Cons (Symbol ">") (Cons s1 (Cons s2 Nil))) env = (>) (condHelper s1 env) (condHelper s2 env)
+conditionalResolver (Cons (Symbol "=") (Cons s1 (Cons s2 Nil))) env = (==) (condHelper s1 env) (condHelper s2 env)
+conditionalResolver (Cons (Symbol "<=") (Cons s1 (Cons s2 Nil))) env = (<=) (condHelper s1 env) (condHelper s2 env)
+conditionalResolver (Cons (Symbol ">=") (Cons s1 (Cons s2 Nil))) env = (>=) (condHelper s1 env) (condHelper s2 env)
 
-conditionalResolver (Cons (Symbol "<") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in f1 < f2
-conditionalResolver (Cons (Symbol ">") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in f1 > f2
-conditionalResolver (Cons (Symbol "=") (Cons (Symbol s1) (Cons (SexprFloat f2) Nil))) env = let f1 = getval $ resolveVar env s1 in f1 == f2
-
-conditionalResolver (Cons (Symbol "<") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in i1 < (fromIntegral i2)
-conditionalResolver (Cons (Symbol ">") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in i1 > (fromIntegral i2)
-conditionalResolver (Cons (Symbol "=") (Cons (Symbol s1) (Cons (SexprInt i2) Nil))) env = let i1 = getval $ resolveVar env s1 in i1 == (fromIntegral i2)
-
-conditionalResolver (Cons (Symbol "<") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in f1 < f2
-conditionalResolver (Cons (Symbol ">") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in f1 > f2
-conditionalResolver (Cons (Symbol "=") (Cons (SexprFloat f1) (Cons (Symbol s2) Nil))) env = let f2 = getval $ resolveVar env s2 in f1 == f2
-
-conditionalResolver (Cons (Symbol "<") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in (fromIntegral i1) < i2
-conditionalResolver (Cons (Symbol ">") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in (fromIntegral i1) > i2
-conditionalResolver (Cons (Symbol "=") (Cons (SexprInt i1) (Cons (Symbol s2) Nil))) env = let i2 = getval $ resolveVar env s2 in (fromIntegral i1) == i2
-
-conditionalResolver (Cons (Symbol "<") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = f1 < f2
-  where f1 = getval $ resolveVar env s1
-        f2 = getval $ resolveVar env s2
-conditionalResolver (Cons (Symbol ">") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = f1 > f2
-  where f1 = getval $ resolveVar env s1
-        f2 = getval $ resolveVar env s2
-conditionalResolver (Cons (Symbol "=") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) env = f1 == f2
-  where f1 = getval $ resolveVar env s1
-        f2 = getval $ resolveVar env s2
+condHelper (SexprInt n) env = fromIntegral n
+condHelper (SexprFloat n) env = n
+condHelper (Symbol s) env = getval $ resolveVar env s
 
 graphicsTranslator :: GraphicsState -> GraphicsState
 graphicsTranslator ([],instcpy,c,s,p,g,jt,env,vs) = ([],instcpy,c,s,p,g,jt,env,vs)
@@ -703,11 +667,11 @@ graphicsTranslator ((MyRepeat (AInt i) inst):rest,instcpy,c,s,p,g,jt,env,vs) =
 
 graphicsTranslator ((SetXY a b):rest,instcpy,c,s,p@(x,y,oldang),g,jt,env,vs) = 
   if isOn vs then graphicsTranslator (rest,instcpy,c,s,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
-  where fltpnt = ((fromIntegral (getintval a)),(fromIntegral (getintval b)))
+  where fltpnt = (getval $ (if isArith a then AGLfloat $ (arithmeticSolver (getsexpr a) env) else a), getval $ (if isArith b then (AGLfloat $ arithmeticSolver (getsexpr b) env) else b))
         ang = getAngle p fltpnt
         dist = getDist p fltpnt
-        gnew = g ++ [(Bend $ ang), (if s == "down" then Straight dist else Invisible dist), (Bend $ -ang)]
-        pnew = ((fromIntegral (getintval a)), (fromIntegral (getintval b)), oldang)
+        gnew = g ++ [(Paint c $ Bend $ ang), Paint c $ (if s == "down" then Straight dist else Invisible dist), (Paint c $ Bend $ -ang)]
+        pnew = ((getval a),(getval b), oldang)
 
 graphicsTranslator ((If (Conditional condsexpr) inst):rest,instcpy,c,s,p,g,jt,env,vs) = 
   if isOn vs then graphicsTranslator (rest, instcpy,cnew,snew,pnew,gnew,jt,env,vs) else ([],instcpy,c,s,p,g,jt,env,vs)
@@ -760,23 +724,30 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env,vs) =
 --testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward (+ arg2 8)) (right 90) (forward (* arg2 arg1)) (right 90) (forward (* 2 5))) (testsub 1 2 3))))"
 --testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (color (+ arg2 arg3)) (forward (+ arg2 8)) (right (* arg3 2)) (backward (* arg2 arg1)) (left (- 3 5)) (forward (* arg4 arg4))) (testsub 1 2 3 4))))"
 --testString = "(define foo '((to testsub (arg1) (if (> arg1 1) ((color 200) (forward 3))) (forward 10)) (testsub 3)))"
--- testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5(repeat 8(make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
--- testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
+--testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5(repeat 8(make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
+--testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
 -- testString = "(define foo'((to bar (x)(if (> x 0)((forward x)(right 90)(bar (- x 4)))))(bar 40)))"
--- testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
+--testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0) ((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity))))(hilbert 10 2 1)))"
 
 --testString = "(define foo '((to testsub (a b c) (if (> b 1) ((testsub 1 (- b 1) (- c 1)) (forward c) (right 5) (testsub 1 (- b 1) (- c 1))))) (testsub 1 5 9)))"
 
 --testString = "(define starfish '((to starfish (side angle inc) (repeat 90 (forward side) (right angle) (make angle (+ angle inc)))) (penup) (forward 50) (pendown) (starfish 30 2 20)))))"
--- testString = "(define stars'((to stars (side angle max) (repeat 5 (star side angle max 1))) (to star (side angle max count) (repeat max (forward (* side count)) (right angle) (make count (+ count 1))))(penup)(forward 50)(pendown)(stars 15 144 8)(penup)(backward 50)))"
+--testString = "(define stars'((to stars (side angle max) (repeat 5 (star side angle max 1))) (to star (side angle max count) (repeat max (forward (* side count)) (right angle) (make count (+ count 1))))(penup)(forward 50)(pendown)(stars 15 144 8)(penup)(backward 50)))"
 -- testString = "(define foo '((repeat 5(forward 50) (stop) (right (/ 360 5)))))"
 --testString = "(define foo '((to spiral(side angle max count)(repeat max(forward (* side count))(right angle)(make count (+ count 1))))(penup)(forward 70)(pendown)(spiral 0.05 10 180 0)))"
 
 --testString = "(define foo '((if (= 1 n) ((forward 10) (penup)))))"
 --testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5 (repeat 8 (make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
 
-testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
+--testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
+
+--testString = "(define lissajous '((to lissajous (a b c t)(penup)(setxy (* (cos c) 75) 100)(pendown)(repeat 364 (color t)(setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100))(make t (+ t 1))))(lissajous 0.1396 -0.12215 0.2094 0)))"
+
+testString = "(define foo '((to circle (h r)(repeat 2 (color h) (make r (* (/ h 360) (* 2 3.1416)))(setxy (* 5 50) (+ 5 50))(make h (+ h 4))))(penup)(setxy 50 50) (pendown)(circle 0 0)))"
+
+--testString = "(define foo '((to circle (h r) (color h)(make r (* (/ h 360) (* 2 3.1416)))(setxy (* 5 50) (+ 5 50))(make h (+ h 4)))(penup)(setxy 50 50) (pendown)(circle 0 0)))"
+
 
 (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
