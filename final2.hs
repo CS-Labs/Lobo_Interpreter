@@ -35,14 +35,22 @@ showCdr x = " . " ++ show x
 
 intNum = (do
   num <- many1 ((sat isDigit))
-  return (read num :: Int))
+  return (read num :: Int)) +++ (do
+    s <- char '-'
+    n <- many1 myDigit
+    return (read ([s] ++ n) :: Int))
 
 
 doubNum = (do
   x <- many1 (sat isDigit)
   y <- symb "."
   z <- many1 (sat isDigit)
-  return (read (x ++ y ++ z) :: Float))
+  return (read (x ++ y ++ z) :: Float)) +++ (do
+    s <- char '-'
+    x <- many1 (sat isDigit)
+    y <- symb "."
+    z <- many1 (sat isDigit)
+    return (read ([s] ++ x ++ y ++ z) :: Float))
 
 isMisc x = if x `elem` ['<', '>', '^', '+', '-', '*', '/', '=', '!'] then True else False
 
@@ -71,7 +79,7 @@ symbol = (do
   y <- token (many symbolic)
   return (x:y)) +++ quote
 
-a = (do {s <- symbol; return $ Symbol s}) +++ (do {n <- doubNum; return $ SexprFloat n}) +++ (do {n <- intNum; return $ SexprInt n})-- +++ (do {symb "\""; s <- test; symb "\""; return $ Symbol s})
+a = (do {n <- doubNum; return $ SexprFloat n}) +++ (do {n <- intNum; return $ SexprInt n}) +++ (do {s <- symbol; return $ Symbol s})-- +++ (do {symb "\""; s <- test; symb "\""; return $ Symbol s})
 
 s = (do {symb "("  +++ symb "\'("; symb ")"; return Nil}) +++ 
     a +++ 
@@ -543,6 +551,8 @@ arithmeticSolver (Cons (Symbol "/") (Cons (Symbol s1) (Cons (Symbol s2) Nil))) e
 
 
 
+
+
 --TODO; same as above there probably is a more consise way to do this.
 conditionalResolver :: Sexpr -> LocalEnv -> Bool
 
@@ -713,8 +723,8 @@ graphicsTranslator ((Call funcName args):rest,instcpy,c,s,p,g,jt,env) = graphics
 --testString = "(define foo '((to testsub (arg1 arg2 arg3) (forward (+ arg2 8)) (right 90) (forward (* arg2 arg1)) (right 90) (forward (* 2 5))) (testsub 1 2 3))))"
 --testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (color (+ arg2 arg3)) (forward (+ arg2 8)) (right (* arg3 2)) (backward (* arg2 arg1)) (left (- 3 5)) (forward (* arg4 arg4))) (testsub 1 2 3 4))))"
 --testString = "(define foo '((to testsub (arg1) (if (> arg1 1) ((color 200) (forward 3))) (forward 10)) (testsub 3)))"
-
---testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
+-- testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5(repeat 8(make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
+-- testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
 -- testString = "(define foo'((to bar (x)(if (> x 0)((forward x)(right 90)(bar (- x 4)))))(bar 40)))"
 testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0) ((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity))))(hilbert 10 2 1)))"
