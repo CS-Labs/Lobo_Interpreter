@@ -357,8 +357,8 @@ stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexp
 type ProgState a = StateT ([Instruction], JumpTable) IO a
 
 
-ifHelper :: Sexpr -> ProgState ([Instruction])
-ifHelper s = do
+elseHelper :: Sexpr -> ProgState ([Instruction])
+elseHelper s = do
   (inst,jt) <- get -- Needed? Taking one to many elements?
   if isNil s then do
     return []
@@ -369,6 +369,14 @@ ifHelper s = do
     return (ifelseInst)
   else do
     return ([])
+
+ifHelper :: Sexpr -> ProgState ([Instruction])
+ifHelper s = do
+  (inst,jt) <- get -- Needed? Taking one to many elements?
+  put([],[])
+  preprocessor (Cons s Nil)
+  (ifinst,_) <- get
+  return (ifinst)
 
 setXYHelper :: Sexpr -> String -> ProgState (Data)
 setXYHelper s t = do
@@ -420,7 +428,7 @@ preprocessor (Cons (Cons (Symbol "right") arithSexpr) rest) = do
   put([],jt)
   preprocessor arithSexpr
   (arithInst,_) <- get
-  put(inst ++ inst ++ [MyRight $ getexpr $ head arithInst],jt)
+  put(inst ++ [MyRight $ getexpr $ head arithInst],jt)
   preprocessor rest
 preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [MyLeft (AGLfloat (fromIntegral i))],jt); preprocessor rest;}
 preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) = do{(inst,jt) <- get; put (inst ++ [MyLeft (Var var)],jt); preprocessor rest;}
@@ -478,22 +486,18 @@ preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) arithSexpr)) rest) =
   preprocessor rest
 preprocessor (Cons (Cons (Symbol "if") sexpr) rest) = do
   (inst,jt) <- get
-  lift $ putStrLn $ show sexpr
   let a = car sexpr
-  lift $ putStrLn $ show a 
   let b = car $ cdr sexpr
-  lift $ putStrLn $ show b 
   let c = cdr $ cdr sexpr
-  lift $ putStrLn $ show c 
-
+  put([],jt)
+  preprocessor (Cons b Nil)
+  (test,_) <- get
   put([],jt)
   preprocessor (Cons a Nil)
   (condInstTmp,_) <- get
   let condInst = getcond $ head condInstTmp
-  put([],jt)
-  preprocessor (Cons b Nil)
-  (ifInst,jt) <- get
-  ifelseInst<- ifHelper c
+  ifInst <- ifHelper b
+  ifelseInst<- elseHelper c
   let instnew = if (isNil c) then [If condInst ifInst] else [IfElse condInst ifInst ifelseInst]
   put(inst ++ instnew,jt)
   preprocessor rest
@@ -511,7 +515,7 @@ preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symb
   put([],jt)
   preprocessor sexpr
   (subroute,_) <- get
-  let params = [NoOp (Var arg1), NoOp (Var arg1)]
+  let params = [NoOp (Var arg1), NoOp (Var arg2)]
   let updatedJt = jt ++ [(funcName, (params, subroute))]
   put(inst,updatedJt)
   preprocessor rest
@@ -548,6 +552,7 @@ preprocessor (Cons (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = d
 
 -- -- Any non-matched symbols should be function calls. 
 preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) = do
+ 
  (inst,jt) <- get
  put([],jt)
  preprocessor sexpr
@@ -773,7 +778,7 @@ graphicsTranslator ((Call funcName args):rest,instcpy,(s,c,p),stack,g,jt,env,vs)
 --testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (color (+ arg2 arg3)) (forward (+ arg2 8)) (right (* arg3 2)) (backward (* arg2 arg1)) (left (- 3 5)) (forward (* arg4 arg4))) (testsub 1 2 3 4))))"
 --testString = "(define foo '((to testsub (arg1) (if (> arg1 1) ((color 200) (forward 3))) (forward 10)) (testsub 3)))"
 --testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5(repeat 8(make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
-testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
+--testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) (forward 3) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
 -- testString = "(define foo'((to bar (x)(if (> x 0)((forward x)(right 90)(bar (- x 4)))))(bar 40)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0) ((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity))))(hilbert 10 2 1)))"
@@ -785,7 +790,9 @@ testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1))
 -- testString = "(define foo '((repeat 5(forward 50) (stop) (right (/ 360 5)))))"
 --testString = "(define foo '((to spiral(side angle max count)(repeat max(forward (* side count))(right angle)(make count (+ count 1))))(penup)(forward 70)(pendown)(spiral 0.05 10 180 0)))"
 
---testString = "(define foo '((if (= 1 n) ((forward 10) (penup)))))"
+--testString = "(define foo '((to testsub (n) (if (= 1 n) ((forward 10)(testsub (- n 1))(right (* n 1))(left (* n 1))(testsub (- n 1)) (penup) (testsub (- n 1)))))(testsub 10) ))"
+
+
 --testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5 (repeat 8 (make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
 
 --testString = "(define foo '((setxy 0 0) (setxy 2 0) (setxy 9 2) (setxy 5 9) (setxy 5 3)   ) )"
@@ -802,7 +809,7 @@ testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1))
 --testString = "(define foo '((to testsub (a b) (setxy (+ a 1) (+ b 1)) (setxy (+ a 1) (+ a 1)) (setxy (+ b 1) (+ b 1)))(testsub 0 3)   ))"
 
 --testString = "(define foo '((setxy 1 4) (setxy 1 1) (setxy 4 4)))"
---testString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
+testString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
 --testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
 --testString = "(define foo '((to circle (h r)   (repeat 90     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))   )  ) (penup) (setxy 50 50) (pendown) (circle 0 0))))"
 --testString = "(define lissajous '((to lissajous (a b c t)(penup)(setxy (* (cos c) 75) 100)(pendown)(repeat 364 (color t)(setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100))(make t (+ t 1))))(lissajous 0.1396 -0.12215 0.2094 0)))"
@@ -825,9 +832,13 @@ main = do
   createWindow "Haskell Plumbing Graphics"
  -- let (instructionStream, jt) = (preprocessor (stripHeader $ p testString) ([],[]))
   (_,(instructionStream,jt)) <- runStateT (preprocessor (stripHeader $ p testString)) ([],[])
-  mapM_ (putStrLn . show) instructionStream
+  putStrLn $ "~~Inst~~"
+  putStrLn $ show instructionStream
+  putStrLn $ "~~Instend~~"
   -- putStrLn $ show instructionStream
+  putStrLn $ "~~jt~~"
   putStrLn $ show jt
+  putStrLn $ "~~jtend~~"
   let graphicsInstructionStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (instructionStream,[], ("down",green,(0.0,0.0,90.0)),[("down",white,(0.0,0.0,90.0))],[],jt,[],"on"))))
   wrappedInstStream <- newIORef graphicsInstructionStream
   displayCallback $= display wrappedInstStream
