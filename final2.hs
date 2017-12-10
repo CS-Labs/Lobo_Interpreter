@@ -114,7 +114,6 @@ white = (1, 1, 1)
 data Graphic = Straight GLfloat | Invisible GLfloat | Bend GLfloat | Join Graphic Graphic | Fork Graphic Graphic | Paint Colour Graphic deriving Show
 
 myJoin = foldr1 Join
-fork = foldr1 Fork
 
 renderStraight :: Point -> Point -> StateT Plumber IO ()
 renderStraight (x0, y0) (x1, y1) =
@@ -208,64 +207,7 @@ draw g = do
   let (x, y) = (-s * (xMax + xMin) / 2, -s * (yMax + yMin) / 2)
   runStateT (render (scale s g)) (Plumber (x, y) 0)
 
-repeat' n g = myJoin $ genericTake n (repeat g)
 
-polygon n = repeat' n . Join (Straight 1) . Bend $ 360 / (fromInteger n)
-
--- Koch curve
-
-koch angle 0 = Straight 1
-koch angle n = scale 2 . kochStep angle $ koch angle (n-1)
-
-kochStep angle g = myJoin [g, Bend (-angle), g, Bend (2*angle), g, Bend (-angle), g]
-
--- Gosper curve
-
-gosper 0 = Straight 1
-gosper n = gosperStep $ gosper (n-1)
-
-gosperStep g = myJoin [Bend 15, g, Bend (-60), g', Bend (-120), g', Bend 60, g, Bend 120, g, g, Bend 60, g', Bend (-75)]
-  where g' = mirror $ reverse g
-
--- Sierpinski tree
-
-sierpinski 0 = Straight 1
-sierpinski n = scale 0.5 . sierpinskiStep $ sierpinski (n-1)
-
-sierpinskiStep g = Straight 2 `Join` fork [Bend (-120) `Join` g, Bend 0 `Join` g, Bend 120 `Join` g]
-
--- Monkey tree
-
-d = (sqrt 3) / 3
-
-monkey 0 = Straight 1
-monkey n = monkeyStep $ monkey (n-1)
-
-monkeyStep g = myJoin [Bend (-60), mirror g, reverse g, Bend 60, g, Bend 60, reverse g, Bend 150, scale d . reverse $ g, scale d . mirror $ g, Bend (-60), scale d . mirror . reverse $ g, Bend (-60), scale d . mirror . reverse $ g, scale d g, Bend (-90), mirror . reverse $ g, g]
-
--- Logo
-
-starfish angle step = myJoin . concat $ take 90 [[Straight 1, Bend angle] | angle <- [angle, angle + step .. ]]
-
-stars angle = repeat' 5 $ myJoin . concat $ take 8 [[Straight i, Bend angle] | i <- [1..]]
-
-logo n x dx y dy = myJoin . concat $ take n [[Straight (x + i*dx), Bend (y + i*dy)] | i <- [1..]]
-
-starfish' angle step = logo 90 1 0 angle step
-
-stars' angle = repeat' 5 $ logo 8 1 1 angle 0
-
--- Marroquin pattern
-
-row n = myJoin [repeat' n $ polygon 4 `Join` Invisible 20, Bend 180, Invisible $ fromIntegral n * 20, Bend (-90), Invisible 20, Bend (-90)]
-
-grid n = myJoin [Bend (-135), Invisible $ sqrt 2 * 10 * fromIntegral (n-1), Bend 135, repeat' n $ row n]
-
-marroquin n = fork [Bend 120 `Join` g, Bend 60 `Join` g, g] where g = grid n
-
--- Wow
-
-wow = scale 1.5 $ repeat' 71 $ (repeat' 360 $ Straight 1 `Join` Bend 1) `Join` Bend 5
 
 --interaction
 
@@ -353,7 +295,6 @@ updatePoint (x,y,a) "R" n = (x,y,a-n)
 updatePoint (x,y,a) "L" n = (x,y,a+n)
 
 
-
 resolveVar :: LocalEnv -> String -> Data
 resolveVar env var = head $ [val | (vartmp, val) <- env, var == vartmp]
 
@@ -412,116 +353,213 @@ getDist (x0,y0,a) (x,y) = (sqrt((x-x0)^2 + (y-y0)^2))
 stripHeader :: Sexpr -> Sexpr
 stripHeader (Cons (Symbol "define") (Cons (Symbol s) (Cons (sexpr) Nil))) = sexpr
 
-stripJumpTable :: ([Instruction], JumpTable) -> [Instruction]
-stripJumpTable (inst,jt) = inst
 
-setxyHelper :: Sexpr -> String -> Data
-setxyHelper s "i" = (AGLfloat (fromIntegral $ getsint s))
-setxyHelper s "f" = (AGLfloat (getsfloat s))
-setxyHelper s "a" = getexpr $ head (stripJumpTable $ preprocessor (Cons s Nil) ([],[]))
-
-myt = "((setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100)))"
-
-mytest (Cons (Cons (Symbol "setxy") arithSexpr) rest)  = inst
-  where first = car arithSexpr
-        second = car $ cdr arithSexpr
-        temp1 = if elem ')' (show first) then "a" else "i"
-        temp2 = if elem ')' (show second) then "a" else "i"
-        type1 = if elem '.' (show first) && temp1 == "i" then "f" else temp1
-        type2 = if elem '.' (show second) && temp2 == "i" then "f" else temp2
-        inst = [SetXY (setxyHelper (Cons first Nil) type1) (setxyHelper (Cons second Nil) type2)]
+type ProgState a = StateT ([Instruction], JumpTable) IO a
 
 
+ifHelper :: Sexpr -> ProgState ([Instruction])
+ifHelper s = do
+  (inst,jt) <- get -- Needed? Taking one to many elements?
+  if isNil s then do
+    return []
+  else if (not $ isNil s) then do
+    put([],jt)
+    preprocessor (Cons s Nil)
+    (ifelseInst,_) <- get
+    return (ifelseInst)
+  else do
+    return ([])
 
-preprocessor :: Sexpr -> ([Instruction], JumpTable) -> ([Instruction], JumpTable)
-preprocessor (Nil) (instStream, jt) = (instStream, jt)
-preprocessor (Cons (SexprInt val) Nil) (instStream, jt) = ((instStream ++ [NoOp (AGLfloat (fromIntegral val))]), jt)
-preprocessor (Cons (SexprFloat val) Nil) (instStream, jt) = ((instStream ++ [NoOp (AGLfloat val)]), jt)
-preprocessor (Cons (Symbol val) Nil) (instStream, jt) = ((instStream ++ [NoOp (Var val)], jt))
-preprocessor (Cons (SexprInt val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (AGLfloat (fromIntegral val))]), jt)
-preprocessor (Cons (SexprFloat val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (AGLfloat val)]), jt)
-preprocessor (Cons (Cons (Symbol "penup") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Penup]),jt)
-preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Pendown]),jt)
-preprocessor (Cons (Cons (Symbol "stop") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Stop]),jt)
-preprocessor (Cons (Cons (Symbol "push") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Push]),jt)
-preprocessor (Cons (Cons (Symbol "pop") Nil) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Pop]),jt)
-preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (AGLfloat (fromIntegral i))]),jt)
-preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Forward (Var var)]),jt)
-preprocessor (Cons (Cons (Symbol "forward") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Forward $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Backward (AGLfloat (fromIntegral i))]),jt)
-preprocessor (Cons (Cons (Symbol "backward") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [Backward (Var var)]),jt)
-preprocessor (Cons (Cons (Symbol "backward") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Backward $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRight (AGLfloat (fromIntegral i))]),jt)
-preprocessor (Cons (Cons (Symbol "right") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRight (Var var)]),jt)
-preprocessor (Cons (Cons (Symbol "right") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyRight $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyLeft (AGLfloat (fromIntegral i))]),jt)
-preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyLeft (Var var)]),jt)
-preprocessor (Cons (Cons (Symbol "left") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyLeft $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "color") (Cons (Symbol var) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (Var var)]),jt)
-preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (AGLfloat (fromIntegral i))]),jt)
-preprocessor (Cons (Cons (Symbol "color") (Cons (SexprFloat i) Nil)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyColor (AGLfloat i)]),jt)
-preprocessor (Cons (Cons (Symbol "color") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyColor $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [MyRepeat (AInt i) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "repeat") (Cons (Symbol var) sexpr)) rest) (instStream, jt) = preprocessor rest ((instStream ++ [MyRepeat (Var var) (stripJumpTable $ preprocessor sexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "setxy") arithSexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ inst),jt)
-  where first = car arithSexpr
-        second = car $ cdr arithSexpr
-        temp1 = if elem ')' (show first) then "a" else "i"
-        temp2 = if elem ')' (show second) then "a" else "i"
-        type1 = if elem '.' (show first) && temp1 == "i" then "f" else temp1
-        type2 = if elem '.' (show second) && temp2 == "i" then "f" else temp2
-        inst = [SetXY (setxyHelper first type1) (setxyHelper second type2)]
+setXYHelper :: Sexpr -> String -> ProgState (Data)
+setXYHelper s t = do
+  (inst,jt) <- get -- Needed? Taking one to many elements?
+  if t == "i" then do
+    return ((AGLfloat (fromIntegral $ getsint s)))
+  else if t == "f" then do
+    return ((AGLfloat (getsfloat s)))
+  else do 
+    put([],jt)
+    preprocessor (Cons s Nil)
+    (instTmp,_) <- get
+    return (getexpr $ head $ instTmp)
 
-preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprInt i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat (fromIntegral i))]),jt)
-preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprFloat i) Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var (AGLfloat i)]),jt)
-preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) arithSexpr)) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Make var $ getexpr $ head (stripJumpTable $ preprocessor arithSexpr ([],jt))]),jt)
-preprocessor (Cons (Cons (Symbol "if") sexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ inst), jt) 
-  where a = car sexpr
-        b = car $ cdr sexpr
-        c = cdr $ cdr sexpr
-        cond = getcond $ head $ stripJumpTable $ preprocessor (Cons a Nil) ([],jt)
-        ifinst = stripJumpTable $ preprocessor (Cons b Nil) ([],jt)
-        inst = (if (isNil c) then [If cond ifinst] else [IfElse cond ifinst (stripJumpTable $ preprocessor (Cons c Nil) ([],jt))])
+preprocessor :: Sexpr -> ProgState ()
+preprocessor (Nil) = return ()
+preprocessor (Cons (SexprInt val) Nil) = do {(inst,jt) <- get; put (inst ++ [NoOp (AGLfloat (fromIntegral val))],jt);}
+preprocessor (Cons (SexprFloat val) Nil) = do {(inst,jt) <- get; put (inst ++ [NoOp (AGLfloat val)], jt);}
+preprocessor (Cons (Symbol val) Nil) = do {(inst,jt) <- get; put (inst ++ [NoOp (Var val)], jt);}
+preprocessor (Cons (SexprInt val) rest) = do {(inst,jt) <- get; put (inst ++ [NoOp (AGLfloat (fromIntegral val))],jt); preprocessor rest;}
+preprocessor (Cons (SexprFloat val) rest) = do {(inst,jt) <- get; put (inst ++ [NoOp (AGLfloat val)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "penup") Nil) rest) = do {(inst,jt) <- get; put (inst ++ [Penup],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "pendown") Nil) rest) = do {(inst,jt) <- get; put (inst ++ [Pendown],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "stop") Nil) rest) = do {(inst,jt) <- get; put (inst ++ [Stop],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "push") Nil) rest) = do {(inst,jt) <- get; put (inst ++ [Push],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "pop") Nil) rest) = do {(inst,jt) <- get; put (inst ++ [Pop],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "forward") (Cons (SexprInt i) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [Forward (AGLfloat (fromIntegral i))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "forward") (Cons (Symbol var) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [Forward (Var var)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "forward") arithSexpr) rest) = do 
+    (inst,jt) <- get
+    put ([],jt)
+    preprocessor arithSexpr;
+    (arithInst,_) <- get  
+    put(inst ++ [Forward $ getexpr $ head arithInst], jt)
+    preprocessor rest
+preprocessor (Cons (Cons (Symbol "backward") (Cons (SexprInt i) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [Backward (AGLfloat (fromIntegral i))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "backward") (Cons (Symbol var) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [Backward (Var var)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "backward") arithSexpr) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor arithSexpr
+  (arithInst,_) <- get
+  put(inst ++ [Backward $ getexpr $ head arithInst],jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "right") (Cons (SexprInt i) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [MyRight (AGLfloat (fromIntegral i))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "right") (Cons (Symbol var) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [MyRight (Var var)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "right") arithSexpr) rest) = do 
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor arithSexpr
+  (arithInst,_) <- get
+  put(inst ++ inst ++ [MyRight $ getexpr $ head arithInst],jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "left") (Cons (SexprInt i) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [MyLeft (AGLfloat (fromIntegral i))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "left") (Cons (Symbol var) Nil)) rest) = do{(inst,jt) <- get; put (inst ++ [MyLeft (Var var)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "left") arithSexpr) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor arithSexpr
+  (arithInst,_) <- get
+  put(inst ++ [MyLeft $ getexpr $ head arithInst],jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "color") (Cons (Symbol var) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [MyColor (Var var)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "color") (Cons (SexprInt i) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [MyColor (AGLfloat (fromIntegral i))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "color") (Cons (SexprFloat i) Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [MyColor (AGLfloat i)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "color") arithSexpr) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor arithSexpr
+  (arithInst,_) <- get
+  put(inst ++ [MyColor $ getexpr $ head arithInst],jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "repeat") (Cons (SexprInt i) sexpr)) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor sexpr
+  (repeatInst,_) <- get
+  put(inst ++ [MyRepeat (AInt i) repeatInst],jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "repeat") (Cons (Symbol var) sexpr)) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor sexpr
+  (repeatInst,_) <- get
+  put(inst ++ [MyRepeat (Var var) repeatInst], jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "setxy") arithSexpr) rest) = do
+  (inst,jt) <- get
+  let first = car arithSexpr
+  let second = car $ cdr arithSexpr
+  let temp1 = if elem ')' (show first) then "a" else "i"
+  let temp2 = if elem ')' (show second) then "a" else "i"
+  let type1 = if elem '.' (show first) && temp1 == "i" then "f" else temp1
+  let type2 = if elem '.' (show second) && temp2 == "i" then "f" else temp2
+  dataOne <- (setXYHelper first type1)
+  dataTwo <- (setXYHelper second type2)
+  put(inst ++ [SetXY dataOne dataTwo], jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprInt i) Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [Make var (AGLfloat (fromIntegral i))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) (Cons (SexprFloat i) Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [Make var (AGLfloat i)],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "make") (Cons (Symbol var) arithSexpr)) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor arithSexpr
+  (arithInst,_) <- get
+  put(inst ++ [Make var $ getexpr $ head arithInst],jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "if") sexpr) rest) = do
+  (inst,jt) <- get
+  lift $ putStrLn $ show sexpr
+  let a = car sexpr
+  lift $ putStrLn $ show a 
+  let b = car $ cdr sexpr
+  lift $ putStrLn $ show b 
+  let c = cdr $ cdr sexpr
+  lift $ putStrLn $ show c 
 
--- Sub routines --
----TODO I just realized this can be converted to one line that takes a variable amount of arguments like call; do later. 
-preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) Nil) sexpr))) rest) (instStream, jt) = preprocessor rest (instStream, updatedJt)
-  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
-        params = [NoOp (Var arg1)]
-        updatedJt = jt ++ [(funcName, (params, subroute))]
-preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) Nil)) sexpr))) rest) (instStream, jt) =  preprocessor rest (instStream, updatedJt)
-  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
-        params = [NoOp (Var arg1), NoOp (Var arg2)]
-        updatedJt = jt ++ [(funcName, (params, subroute))]
-preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) Nil))) sexpr))) rest)  (instStream, jt) =  preprocessor rest (instStream, updatedJt)
-  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
-        params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3)]
-        updatedJt = jt ++ [(funcName, (params, subroute))]
-preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) (Cons (Symbol arg4) Nil)))) sexpr))) rest)  (instStream, jt)=  preprocessor rest (instStream, updatedJt)
-  where subroute =  (stripJumpTable $ preprocessor sexpr ([], jt)) 
-        params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3), NoOp (Var arg4)]
-        updatedJt = jt ++ [(funcName, (params, subroute))]
+  put([],jt)
+  preprocessor (Cons a Nil)
+  (condInstTmp,_) <- get
+  let condInst = getcond $ head condInstTmp
+  put([],jt)
+  preprocessor (Cons b Nil)
+  (ifInst,jt) <- get
+  ifelseInst<- ifHelper c
+  let instnew = if (isNil c) then [If condInst ifInst] else [IfElse condInst ifInst ifelseInst]
+  put(inst ++ instnew,jt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) Nil) sexpr))) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor sexpr
+  (subroute,_) <- get
+  let params = [NoOp (Var arg1)]
+  let updatedJt = jt ++ [(funcName, (params, subroute))]
+  put(inst,updatedJt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) Nil)) sexpr))) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor sexpr
+  (subroute,_) <- get
+  let params = [NoOp (Var arg1), NoOp (Var arg1)]
+  let updatedJt = jt ++ [(funcName, (params, subroute))]
+  put(inst,updatedJt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) Nil))) sexpr))) rest) = do 
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor sexpr
+  (subroute,_) <- get
+  let params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3)]
+  let updatedJt = jt ++ [(funcName, (params, subroute))]
+  put(inst,updatedJt)
+  preprocessor rest
+preprocessor (Cons (Cons (Symbol "to") (Cons (Symbol funcName) (Cons (Cons (Symbol arg1) (Cons (Symbol arg2) (Cons (Symbol arg3) (Cons (Symbol arg4) Nil)))) sexpr))) rest) = do
+  (inst,jt) <- get
+  put([],jt)
+  preprocessor sexpr
+  (subroute,_) <- get
+  let params = [NoOp (Var arg1), NoOp (Var arg2), NoOp (Var arg3), NoOp (Var arg4)]
+  let updatedJt = jt ++ [(funcName, (params, subroute))]
+  put(inst,updatedJt)
+  preprocessor rest
 
---arithmetic
-preprocessor (Cons (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt)  = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "-") (Cons sexpr Nil)) rest) (instStream,jt) = preprocessor rest ((instStream ++ [ArithWrapper $ Arithmetic (Cons (Symbol "-") (Cons (SexprFloat 0.0) (Cons sexpr Nil)))]),jt)
+-- --arithmetic
+preprocessor (Cons (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [ArithWrapper $ Arithmetic (Cons (Symbol "+") (Cons sexpr1 (Cons sexpr2 Nil)))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [ArithWrapper $ Arithmetic (Cons (Symbol "-") (Cons sexpr1 (Cons sexpr2 Nil)))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [ArithWrapper $ Arithmetic (Cons (Symbol "*") (Cons sexpr1 (Cons sexpr2 Nil)))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [ArithWrapper $ Arithmetic (Cons (Symbol "/") (Cons sexpr1 (Cons sexpr2 Nil)))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "-") (Cons sexpr Nil)) rest) = do {(inst,jt) <- get; put (inst ++ [ArithWrapper $ Arithmetic (Cons (Symbol "-") (Cons (SexprFloat 0.0) (Cons sexpr Nil)))],jt); preprocessor rest;}
 
---conditionals
-preprocessor (Cons (Cons (Symbol "<") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [CondWrapper $ Conditional (Cons (Symbol "<") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol ">") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [CondWrapper $ Conditional (Cons (Symbol ">") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
-preprocessor (Cons (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil))) rest) (instStream, jt) = preprocessor rest ((instStream ++ [CondWrapper $ Conditional (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil)))]),jt)
+-- --conditionals
+preprocessor (Cons (Cons (Symbol "<") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [CondWrapper $ Conditional (Cons (Symbol "<") (Cons sexpr1 (Cons sexpr2 Nil)))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol ">") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [CondWrapper $ Conditional (Cons (Symbol ">") (Cons sexpr1 (Cons sexpr2 Nil)))],jt); preprocessor rest;}
+preprocessor (Cons (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil))) rest) = do {(inst,jt) <- get; put (inst ++ [CondWrapper $ Conditional (Cons (Symbol "=") (Cons sexpr1 (Cons sexpr2 Nil)))],jt); preprocessor rest;}
 
--- Any non-matched symbols should be function calls. 
-preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) (instStream, jt) = preprocessor rest ((instStream ++ [Call fCall (stripJumpTable $ preprocessor sexpr ([], jt))]) ,jt)
+-- -- Any non-matched symbols should be function calls. 
+preprocessor (Cons (Cons (Symbol fCall) sexpr) rest) = do
+ (inst,jt) <- get
+ put([],jt)
+ preprocessor sexpr
+ (args,_) <- get
+ put(inst ++ [Call fCall args],jt)
+ preprocessor rest
 
--- Params to functions. 
-preprocessor (Cons (Symbol val) rest) (instStream, jt) = preprocessor rest ((instStream ++ [NoOp (Var val)]), jt)
+-- -- Params to functions. 
+preprocessor (Cons (Symbol val) rest) = do {(inst,jt) <- get; put (inst ++ [NoOp (Var val)], jt); preprocessor rest;}
 
--- Triple nested cons are reduced by one level.
-preprocessor (Cons rest nil) (instStream, jt) = preprocessor rest (instStream,jt)  
+-- -- Triple nested cons are reduced by one level.
+preprocessor (Cons rest nil) = do {(inst,jt) <- get; put (inst,jt); preprocessor rest;}
 
 --type GraphicsState =  ([Instruction], [Instruction], PenState, [Graphic], JumpTable, LocalEnv, TS)
 
@@ -735,7 +773,7 @@ graphicsTranslator ((Call funcName args):rest,instcpy,(s,c,p),stack,g,jt,env,vs)
 --testString = "(define foo '((to testsub (arg1 arg2 arg3 arg4) (color (+ arg2 arg3)) (forward (+ arg2 8)) (right (* arg3 2)) (backward (* arg2 arg1)) (left (- 3 5)) (forward (* arg4 arg4))) (testsub 1 2 3 4))))"
 --testString = "(define foo '((to testsub (arg1) (if (> arg1 1) ((color 200) (forward 3))) (forward 10)) (testsub 3)))"
 --testString = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5(repeat 8(make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
---testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
+testString = "(define koch'((to koch (n) (if (= n 1) (forward 8) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
 -- testString = "(define foo'((to bar (x)(if (> x 0)((forward x)(right 90)(bar (- x 4)))))(bar 40)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
 --testString = "(define hilbert'((to hilbert (size level parity)(if (> level 0) ((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity))))(hilbert 10 2 1)))"
@@ -774,19 +812,23 @@ graphicsTranslator ((Call funcName args):rest,instcpy,(s,c,p),stack,g,jt,env,vs)
 --testString = "(define tree'((to tree (depth count)(forward (* depth 20))(right 90)(if (> depth 1)(repeat 5 (push)(left (* count 30))(color (* 60 count)) (tree (- depth 1) 1)(pop)(make count (+ count 1)))))(tree 4 1)))"
 --testString = "(define foo '(((color 200)(forward 25)(push)(color 0)(right 45)(forward 50)(right 45)(forward 20)(pop)(forward 25))))"
 
-testString = "(define hexfield '((to hexfield (n c)(if (= n 1)(repeat 6 (forward 20) (left 60)(color (* c 60))(make c (+ c 1))) (repeat 6 (forward 20) (push) (right 180) (hexfield (- n 1) 0)(pop)(left 60))))(penup)(forward 100)(pendown)(right 90)(hexfield 3 0)))"
+--testString = "(define hexfield '((to hexfield (n c)(if (= n 1)(repeat 6 (forward 20) (left 60)(color (* c 60))(make c (+ c 1))) (repeat 6 (forward 20) (push) (right 180) (hexfield (- n 1) 0)(pop)(left 60))))(penup)(forward 100)(pendown)(right 90)(hexfield 3 0)))"
 
-(debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
+-- (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
-debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (debugGetInstStream,[],("down",white,(0.0,0.0,90.0)),[("down",white,(0.0,0.0,90.0))],[],debugJt,[],"on"))))
-    where (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
+-- debugGetGraphicsInstStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (debugGetInstStream,[],("down",green,(0.0,0.0,90.0)),[("down",white,(0.0,0.0,90.0))],[],debugJt,[],"on"))))
+--     where (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
 
 main = do
   (progname, _) <- getArgsAndInitialize
   createWindow "Haskell Plumbing Graphics"
-  let (instructionStream, jt) = (preprocessor (stripHeader $ p testString) ([],[]))
-  let graphicsInstructionStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (instructionStream,[], ("down",white,(0.0,0.0,90.0)),[("down",white,(0.0,0.0,90.0))],[],jt,[],"on"))))
+ -- let (instructionStream, jt) = (preprocessor (stripHeader $ p testString) ([],[]))
+  (_,(instructionStream,jt)) <- runStateT (preprocessor (stripHeader $ p testString)) ([],[])
+  mapM_ (putStrLn . show) instructionStream
+  -- putStrLn $ show instructionStream
+  putStrLn $ show jt
+  let graphicsInstructionStream = ([Bend 90] ++ (getGraphicInstStream (graphicsTranslator (instructionStream,[], ("down",green,(0.0,0.0,90.0)),[("down",white,(0.0,0.0,90.0))],[],jt,[],"on"))))
   wrappedInstStream <- newIORef graphicsInstructionStream
   displayCallback $= display wrappedInstStream
   actionOnWindowClose $= MainLoopReturns
