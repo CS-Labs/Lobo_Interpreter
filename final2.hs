@@ -880,7 +880,7 @@ graphicsTranslator ((Call funcName args):rest) = do
 --testString = "(define foo '((to testsub (a b) (setxy (+ a 1) (+ b 1)) (setxy (+ a 1) (+ a 1)) (setxy (+ b 1) (+ b 1)))(testsub 0 3)   ))"
 
 --testString = "(define foo '((setxy 1 4) (setxy 1 1) (setxy 4 4)))"
-testString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
+--testString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
 --testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
 --testString = "(define foo '((to circle (h r)   (repeat 90     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))   )  ) (penup) (setxy 50 50) (pendown) (circle 0 0))))"
 --testString = "(define lissajous '((to lissajous (a b c t)(penup)(setxy (* (cos c) 75) 100)(pendown)(repeat 364 (color t)(setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100))(make t (+ t 1))))(lissajous 0.1396 -0.12215 0.2094 0)))"
@@ -898,7 +898,16 @@ testString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (f
 --     where (debugGetInstStream, debugJt) = (preprocessor (stripHeader $ p testString) ([],[]))
 
 getStart :: String -> String
-getStart "broccoli" = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
+getStart "broccoli" = "(define broccoli'((to broccoli (x y)(penup)(left 90)(forward 50)(right 90)(pendown)(broccoli1 x y))(to broccoli1 (x y) (if (< x y) (stop) ((square x) (forward x) (left 45) (broccoli1 (/ x (sqrt 2)) y) (penup) (backward (/ x (sqrt 2))) (left 45) (pendown)(backward x))))(to square (x) (repeat 4 (forward x) (right 90)))(broccoli 100 1)))"
+getStart "fancy-spiral" = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
+getStart "lissajous" = "(define lissajous '((to lissajous (a b c t)(penup)(setxy (* (cos c) 75) 100)(pendown)(repeat 364 (color t)(setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100))(make t (+ t 1))))(lissajous 0.1396 -0.12215 0.2094 0)))"
+getStart "hexfield" = "(define hexfield '((to hexfield (n c)(if (= n 1)(repeat 6 (forward 20) (left 60)(color (* c 60))(make c (+ c 1))) (repeat 6 (forward 20) (push) (right 180) (hexfield (- n 1) 0)(pop)(left 60))))(penup)(forward 100)(pendown)(right 90)(hexfield 3 0)))"
+getStart "circles" = "(define circles'((to circle (seg clr)(if (< seg 1)(forward 0)(repeat 5(repeat 8(make clr (+ clr 10))(forward seg)(right 9))(right 180)(circle (/ seg 2) (+ clr 47))(right 180))))(penup)(setxy -50 200)(pendown)(circle 10 0)))"
+getStart "stars" = "(define stars'((to stars (side angle max) (repeat 5 (star side angle max 1))) (to star (side angle max count) (repeat max (forward (* side count)) (right angle) (make count (+ count 1))))(penup)(forward 50)(pendown)(stars 15 144 8)(penup)(backward 50)))"
+getStart "starfish" = "(define starfish '((to starfish (side angle inc) (repeat 90 (forward side) (right angle) (make angle (+ angle inc)))) (penup) (forward 50) (pendown) (starfish 30 2 20)))))"
+getStart "hilbert" = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
+getStart "koch" = "(define koch'((to koch (n) (if (= n 1) (forward 8) (forward 3) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
+getStart "tree" = "(define tree'((to tree (depth count)(forward (* depth 20))(right 90)(if (> depth 1)(repeat 5 (push)(left (* count 30))(color (* 60 count)) (tree (- depth 1) 1)(pop)(make count (+ count 1)))))(tree 4 1)))"
 getStart  _ = "invalid"
 
 main = do
