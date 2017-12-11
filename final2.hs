@@ -647,73 +647,98 @@ graphicsTranslator ((Make var val):rest) = do
   if isOn vs then do {put (instcpy,(s,c,p),stack,g,jt,updatedEnv,vs); graphicsTranslator rest} 
     else return ()
 
--- graphicsTranslator ((Forward (Var var)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) =  
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where val = getval $ resolveVar env var
---         pnew = (updatePoint p "F" val)
---         gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
+graphicsTranslator ((Forward (Var var)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let val = getval $ resolveVar env var
+  let pnew = (updatePoint p "F" val)
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()        
 
--- graphicsTranslator ((Forward (Arithmetic arithSexpr)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) =  
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
---         pnew = (updatePoint p "F" val)
---         gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
+graphicsTranslator ((Forward (Arithmetic arithSexpr)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get 
+  let val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
+  let pnew = (updatePoint p "F" val)
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight val else Invisible val)]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
--- graphicsTranslator ((Forward val):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where pnew = (updatePoint p "F" ((getval val) :: Float))
---         gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))]
+graphicsTranslator ((Forward val):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get 
+  let pnew = (updatePoint p "F" ((getval val) :: Float))
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (getval val) else Invisible (getval val))]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
+ 
+graphicsTranslator ((Backward (Var var)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let val = getval $ resolveVar env var
+  let pnew = (updatePoint p "B" val)
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
--- graphicsTranslator ((Backward (Var var)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where val = getval $ resolveVar env var
---         pnew = (updatePoint p "B" val)
---         gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
+graphicsTranslator ((Backward (Arithmetic arithSexpr)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
+  let pnew = (updatePoint p "B" val)
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()  
 
--- graphicsTranslator ((Backward (Arithmetic arithSexpr)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
---         pnew = (updatePoint p "B" val)
---         gnew = g ++ [Paint c $ (if s == "down" then Straight (-val) else Invisible (-val))]
+graphicsTranslator ((Backward val):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let pnew = (updatePoint p "B" ((getval val) :: Float))
+  let gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
+ 
 
--- graphicsTranslator ((Backward val):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where pnew = (updatePoint p "B" ((getval val) :: Float))
---         gnew = g ++ [Paint c $ (if s == "down" then Straight (-(getval val)) else Invisible (-(getval val)))]
+graphicsTranslator ((MyRight (Var var)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let val = getval $ resolveVar env var
+  let pnew = (updatePoint p "R" val)
+  let gnew = g ++ [Paint c $ Bend (-val)]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
--- graphicsTranslator ((MyRight (Var var)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where val = getval $ resolveVar env var
---         pnew = (updatePoint p "R" val)
---         gnew = g ++ [Paint c $ Bend (-val)]
+graphicsTranslator ((MyRight (Arithmetic arithSexpr)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get 
+  let val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
+  let pnew = (updatePoint p "R" val)
+  let gnew = g ++ [Paint c $ Bend (-val)]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
--- graphicsTranslator ((MyRight (Arithmetic arithSexpr)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,pnew),stack,g,jt,env,vs)
---   where val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
---         pnew = (updatePoint p "R" val)
---         gnew = g ++ [Paint c $ Bend (-val)]
+graphicsTranslator ((MyRight val):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let pnew = (updatePoint p "R" ((getval val) :: Float))
+  let gnew = g ++ [Paint c $ Bend (-(getval val))]
+  if isOn vs then do{put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest}  
+    else return ()
 
--- graphicsTranslator ((MyRight val):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs)  else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where pnew = (updatePoint p "R" ((getval val) :: Float))
---         gnew = g ++ [Paint c $ Bend (-(getval val))]
+graphicsTranslator ((MyLeft (Var var)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let val = getval $ resolveVar env var
+  let pnew = (updatePoint p "L" val)
+  let gnew = g ++ [Paint c $ Bend val]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
--- graphicsTranslator ((MyLeft (Var var)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([], instcpy,(s,c,p),stack,g,jt,env,vs)
---   where val = getval $ resolveVar env var
---         pnew = (updatePoint p "L" val)
---         gnew = g ++ [Paint c $ Bend val]
+graphicsTranslator ((MyLeft (Arithmetic arithSexpr)):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
+  let pnew = (updatePoint p "L" val)
+  let gnew = g ++ [Paint c $ Bend val]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
--- graphicsTranslator ((MyLeft (Arithmetic arithSexpr)):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where val = getval $ (AGLfloat $ arithmeticSolver arithSexpr env)
---         pnew = (updatePoint p "L" val)
---         gnew = g ++ [Paint c $ Bend val]
-
--- graphicsTranslator ((MyLeft val):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where pnew = (updatePoint p "L" ((getval val) :: Float))
---         gnew = g ++ [Paint c $ Bend (getval val)]
+graphicsTranslator ((MyLeft val):rest) = do 
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let pnew = (updatePoint p "L" ((getval val) :: Float))
+  let gnew = g ++ [Paint c $ Bend (getval val)]
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
 -- graphicsTranslator ((MyRepeat (Var var) inst):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
 --   if isOn vs then graphicsTranslator (rest,instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
@@ -726,15 +751,17 @@ graphicsTranslator ((Make var val):rest) = do
 --   where (_,_,(snew,cnew,pnew),stacknew,gacc,_,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,(s,c,p),stack,[],jt,env,vs) !! i  -- Take the ith iteration. 
 --         gnew = g ++ gacc
 
--- graphicsTranslator ((SetXY a b):rest,instcpy,(s,c,p@(x,y,oldang)),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(s,c,pnew),stack,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where xnew = getval $ (if isArith a then AGLfloat $ (arithmeticSolver (getsexpr a) env) else a)
---         ynew = getval $ (if isArith b then AGLfloat $ (arithmeticSolver (getsexpr b) env) else b)
---         fltpnt = (xnew, ynew)
---         ang = getAngle p fltpnt
---         dist = getDist p fltpnt
---         gnew = g ++ (if xnew == x && ynew == y then [] else [(Paint c $ Bend $ ang), Paint c $ (if s == "down" then Straight dist else Invisible dist), (Paint c $ Bend $ -ang)])
---         pnew = (xnew, ynew, oldang)
+graphicsTranslator ((SetXY a b):rest) = do 
+  (instcpy,(s,c,p@(x,y,oldang)),stack,g,jt,env,vs) <- get 
+  let xnew = getval $ (if isArith a then AGLfloat $ (arithmeticSolver (getsexpr a) env) else a)
+  let ynew = getval $ (if isArith b then AGLfloat $ (arithmeticSolver (getsexpr b) env) else b)
+  let fltpnt = (xnew, ynew)
+  let ang = getAngle p fltpnt
+  let dist = getDist p fltpnt
+  let gnew = g ++ (if xnew == x && ynew == y then [] else [(Paint c $ Bend $ ang), Paint c $ (if s == "down" then Straight dist else Invisible dist), (Paint c $ Bend $ -ang)])
+  let pnew = (xnew, ynew, oldang)
+  if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
+    else return ()
 
 -- graphicsTranslator ((If (Conditional condsexpr) inst):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
 --   if isOn vs then graphicsTranslator (rest, instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
