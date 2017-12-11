@@ -908,6 +908,19 @@ getStart "starfish" = "(define starfish '((to starfish (side angle inc) (repeat 
 getStart "hilbert" = "(define hilbert'((to hilbert (size level parity)(if (> level 0)((left (* parity 90))(hilbert size (- level 1) (- parity))(forward size)(right (* parity 90))(hilbert size (- level 1) parity)(forward size)(hilbert size (- level 1) parity)(right (* parity 90))(forward size)(hilbert size (- level 1) (- parity))(left (* parity 90)))))(hilbert 10 4 1)))"
 getStart "koch" = "(define koch'((to koch (n) (if (= n 1) (forward 8) (forward 3) ((koch (- n 1)) (left 60) (koch (- n 1)) (right 120) (koch (- n 1)) (left 60) (koch (- n 1)))))(repeat 3 (koch 4)(right 120))))"
 getStart "tree" = "(define tree'((to tree (depth count)(forward (* depth 20))(right 90)(if (> depth 1)(repeat 5 (push)(left (* count 30))(color (* 60 count)) (tree (- depth 1) 1)(pop)(make count (+ count 1)))))(tree 4 1)))"
+getStart "e1" = "(define foo '((forward 50)))"
+getStart "e2" = "(define foo '(((forward 50)(right 90)(forward 50))))"
+getStart "e3" = "(define foo '(((forward 50)(left 90)(forward 50))))"
+getStart "e4" = "(define foo '(((forward 50)(right 90)(backward 50))))"
+getStart "e5" = "(define foo '((repeat 5 (penup)(forward 5)(pendown)(forward 5))))"
+getStart "e6" = "(define foo '((repeat 5 (forward 50)(right (/ 360 5)))))"
+getStart "e7" = "(define foo '(((to square (side)(repeat 4 (forward side) (right 90)))(square 50))))"
+getStart "e8" = "(define foo '(((to spiral(side angle max count)(repeat max (forward (* side count))(right angle) (make count (+ count 1))))(penup)(forward 70)(pendown)(spiral 0.05 10 180 0))))"
+getStart "e9" = "(define foo '(((right 30)(color 60) (forward 100)(right 120)(color 300)(forward 100)(right 120)(color 180)(forward 80))))"
+getStart "e10" = "(define foo '(((to circle (h r) (repeat 90 (color h) (make r (* (/ h 360) (* 2 3.1416)))(setxy (* (cos r) 50) (+ (* (sin r) 50) 50)) (make h (+ h 4)))) (penup)(setxy 50 50) (pendown) (circle 0 0))))"
+getStart "e11" = "(define foo '(((color 200) (forward 25) (push) (color 0) (right 45) (forward 50) (pop) (forward 25))))"
+
+
 getStart  _ = "invalid"
 
 main = do
