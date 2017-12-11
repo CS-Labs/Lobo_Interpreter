@@ -781,6 +781,7 @@ graphicsTranslator ((If (Conditional condsexpr) inst):rest) = do
     (_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) <- recurHelper inst
     let gnew = g ++ gacc
     put(instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew)
+    graphicsTranslator rest
   else return ()
 
 graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest) = do
@@ -796,6 +797,7 @@ graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest) = do
     (_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) <- recurHelper elseinst
     let gnew = g ++ gacc
     put(instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew)
+    graphicsTranslator rest
   else return ()
 
 graphicsTranslator ((Call funcName args):rest) = do
@@ -811,6 +813,7 @@ graphicsTranslator ((Call funcName args):rest) = do
       (_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) <- recurHelper subProcInst
       let gnew = g ++ gacc
       put(instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew)
+      graphicsTranslator rest
     else return ()
 
 
@@ -873,8 +876,8 @@ graphicsTranslator ((Call funcName args):rest) = do
 --testString = "(define foo '((to testsub (a b) (setxy (+ a 1) (+ b 1)) (setxy (+ a 1) (+ a 1)) (setxy (+ b 1) (+ b 1)))(testsub 0 3)   ))"
 
 --testString = "(define foo '((setxy 1 4) (setxy 1 1) (setxy 4 4)))"
---estString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
-testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
+--testString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
+--testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
 --testString = "(define foo '((to circle (h r)   (repeat 90     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))   )  ) (penup) (setxy 50 50) (pendown) (circle 0 0))))"
 --testString = "(define lissajous '((to lissajous (a b c t)(penup)(setxy (* (cos c) 75) 100)(pendown)(repeat 364 (color t)(setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100))(make t (+ t 1))))(lissajous 0.1396 -0.12215 0.2094 0)))"
 -- testString = "(define foo '((to circle (h r)   (repeat 12     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4)) (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))  )  ) (penup) (setxy 50 50) (pendown) (circle 0 0))))"
