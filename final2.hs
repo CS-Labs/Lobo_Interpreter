@@ -566,13 +566,6 @@ preprocessor (Cons (Symbol val) rest) = do {(inst,jt) <- get; put (inst ++ [NoOp
 -- -- Triple nested cons are reduced by one level.
 preprocessor (Cons rest nil) = do {(inst,jt) <- get; put (inst,jt); preprocessor rest;}
 
---type GraphicsState =  ([Instruction], [Instruction], PenState, [Graphic], JumpTable, LocalEnv, TS)
-
--- getGraphicInstStream :: GraphicsState-> [Graphic]
--- getGraphicInstStream (_,_,_,_,graphicInstStream,_,_,_) = graphicInstStream
-
--- dup :: ([Instruction], [Instruction], PenState, [PenState], [Graphic], JumpTable, LocalEnv, TS) -> ([Instruction], [Instruction], PenState,[PenState], [Graphic], JumpTable, LocalEnv,TS)
--- dup (a,b,c,d,e,f,g,h) = (b,b,c,d,e,f,g,h)
 
 arithmeticSolver (Cons (Symbol "+") (Cons s1 (Cons s2 Nil))) env = (+) (arithmeticSolver s1 env) (arithmeticSolver s2 env) 
 arithmeticSolver (Cons (Symbol "*") (Cons s1 (Cons s2 Nil))) env = (*) (arithmeticSolver s1 env) (arithmeticSolver s2 env) 
@@ -596,19 +589,36 @@ condHelper (SexprInt n) env = fromIntegral n
 condHelper (SexprFloat n) env = n
 condHelper (Symbol s) env = getval $ resolveVar env s
 
+repeatHelper :: [Instruction] -> Int -> GSM (GraphicsState)
+repeatHelper inst 0 = do {(inst,ps,stack,g,jt,env,vs) <- get; return ((inst,ps,stack,g,jt,env,vs));}
+repeatHelper inst n = do
+  graphicsTranslator inst
+  (_,ps,stack,g,jt,env,vs) <- get
+  put(inst,ps,stack,g,jt,env,vs)
+  repeatHelper inst (n - 1)
+
+recurHelper :: [Instruction] -> GSM (GraphicsState)
+recurHelper inst = do
+  graphicsTranslator inst
+  (instcpy,ps,stack,g,jt,env,vs) <- get
+  return (instcpy,ps,stack,g,jt,env,vs)
 
 graphicsTranslator :: [Instruction] -> GSM ()
 graphicsTranslator [] = return ()
 graphicsTranslator (Stop:rest) = do {(instcpy,(s,c,p),stack,g,jt,env,vs) <- get; put (instcpy,(s,c,p),stack,g,jt,env,"off")}
 graphicsTranslator (Push:rest) = do {(instcpy,(s,c,p),stack,g,jt,env,vs) <- get; put (instcpy,(s,c,p),(s,c,p):stack,g,jt,env,vs); graphicsTranslator rest}
--- graphicsTranslator ((Pop:rest),instcpy,(s,c,p),stack,g,jt,env,vs) = graphicsTranslator (rest,instcpy,newpstate,newstack,gnew,jt,env,vs)
---   where oldpstate@(sold,cold,pold@(xold,yold,oldang)) = (s,c,p)
---         newpstate@(snew,cnew,pnew@(xnew,ynew,newang)) = head stack
---         newstack = tail stack
---         ang = getAngle pold (xnew,ynew)
---         dist = getDist pold (xnew,ynew)
---         gtmp = (if xnew == xold && ynew == xold then [] else [(Paint c $ Bend $ ang), Paint c $ Invisible dist, (Paint c $ Bend $ -ang)]) ++ [(Paint c $ Bend $ (newang - oldang))]
---         gnew = g ++ gtmp
+graphicsTranslator (Pop:rest) = do
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let oldpstate@(sold,cold,pold@(xold,yold,oldang)) = (s,c,p)
+  let newpstate@(snew,cnew,pnew@(xnew,ynew,newang)) = head stack
+  let newstack = tail stack
+  let ang = getAngle pold (xnew,ynew)
+  let dist = getDist pold (xnew,ynew)
+  let gtmp = (if xnew == xold && ynew == xold then [] else [(Paint c $ Bend $ ang), Paint c $ Invisible dist, (Paint c $ Bend $ -ang)]) ++ [(Paint c $ Bend $ (newang - oldang))]
+  let gnew = g ++ gtmp
+  put(instcpy,newpstate,newstack,gnew,jt,env,vs)
+  graphicsTranslator rest
+
 
 graphicsTranslator ((MyColor (Var var)):rest) = do
   (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
@@ -740,16 +750,16 @@ graphicsTranslator ((MyLeft val):rest) = do
   if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
     else return ()
 
--- graphicsTranslator ((MyRepeat (Var var) inst):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where  i = floor $ getval $ resolveVar env var
---          (_,_,(snew,cnew,pnew),stacknew,gacc,_,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,(s,c,p),stack,[],jt,env,vs) !! i  -- Take the ith iteration. 
---          gnew = g ++ gacc
+graphicsTranslator ((MyRepeat (Var var) inst):rest) = do
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let i = floor $ getval $ resolveVar env var
+  if isOn vs then do {(instcpy,(s,c,p),stack,g,jt,env,vs) <- repeatHelper inst i; graphicsTranslator rest;}
+    else return ()
 
--- graphicsTranslator ((MyRepeat (AInt i) inst):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vs) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where (_,_,(snew,cnew,pnew),stacknew,gacc,_,_,_) = iterate (dup . graphicsTranslator . dup) (inst,inst,(s,c,p),stack,[],jt,env,vs) !! i  -- Take the ith iteration. 
---         gnew = g ++ gacc
+graphicsTranslator ((MyRepeat (AInt i) inst):rest) = do
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  if isOn vs then do {(instcpy,(s,c,p),stack,g,jt,env,vs) <- repeatHelper inst i; graphicsTranslator rest;} 
+    else return ()
 
 graphicsTranslator ((SetXY a b):rest) = do 
   (instcpy,(s,c,p@(x,y,oldang)),stack,g,jt,env,vs) <- get 
@@ -763,28 +773,45 @@ graphicsTranslator ((SetXY a b):rest) = do
   if isOn vs then do {put (instcpy,(s,c,pnew),stack,gnew,jt,env,vs); graphicsTranslator rest} 
     else return ()
 
--- graphicsTranslator ((If (Conditional condsexpr) inst):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest, instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where condResult = conditionalResolver condsexpr env
---         (_,_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) = if condResult then graphicsTranslator (inst,[],(s,c,p),stack,[],jt,env,vs) else ([],[],(s,c,p),stack,[],[],[],vs)
---         gnew = g ++ gacc
+graphicsTranslator ((If (Conditional condsexpr) inst):rest) = do
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let condResult = conditionalResolver condsexpr env
+  if (isOn vs) && condResult then do
+    put([],(s,c,p),stack,[],jt,env,vs)
+    (_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) <- recurHelper inst
+    let gnew = g ++ gacc
+    put(instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew)
+  else return ()
 
--- graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest, instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where condResult = conditionalResolver condsexpr env
---         (_,_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) = if condResult then graphicsTranslator (ifinst,[],(s,c,p),stack,[],jt,env,vs) else graphicsTranslator (elseinst,[],(s,c,p),stack,g,jt,env,vs)
---         gnew = g ++ gacc
+graphicsTranslator ((IfElse (Conditional condsexpr) ifinst elseinst):rest) = do
+  (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+  let condResult = conditionalResolver condsexpr env
+  if (isOn vs) && condResult then do
+    put([],(s,c,p),stack,[],jt,env,vs)
+    (_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) <- recurHelper ifinst
+    let gnew = g ++ gacc
+    put(instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew)
+  else if (isOn vs) && (not condResult) then do
+    put([],(s,c,p),stack,[],jt,env,vs)
+    (_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) <- recurHelper elseinst
+    let gnew = g ++ gacc
+    put(instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew)
+  else return ()
 
--- graphicsTranslator ((Call funcName args):rest,instcpy,(s,c,p),stack,g,jt,env,vs) = 
---   if isOn vs then graphicsTranslator (rest,instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew) else ([],instcpy,(s,c,p),stack,g,jt,env,vs)
---   where subProc = getSubRoute funcName jt
---         params = getParams subProc
---         subProcInst = getSubRouteInst subProc
---         resolvedArgs = resolveArithArgs (resolveArgs args env) env
---         bindings = zip params resolvedArgs
---         subProcEnv = updateEnv bindings []
---         (_,_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) = graphicsTranslator (subProcInst,[],(s,c,p),stack,[],jt,subProcEnv,vs) 
---         gnew = g ++ gacc
+graphicsTranslator ((Call funcName args):rest) = do
+    (instcpy,(s,c,p),stack,g,jt,env,vs) <- get
+    if isOn vs then do
+      let subProc = getSubRoute funcName jt
+      let params = getParams subProc
+      let subProcInst = getSubRouteInst subProc
+      let resolvedArgs = resolveArithArgs (resolveArgs args env) env
+      let bindings = zip params resolvedArgs
+      let subProcEnv = updateEnv bindings []
+      put([],(s,c,p),stack,[],jt,subProcEnv,vs)
+      (_,(snew,cnew,pnew),stacknew,gacc,_,_,vsnew) <- recurHelper subProcInst
+      let gnew = g ++ gacc
+      put(instcpy,(snew,cnew,pnew),stacknew,gnew,jt,env,vsnew)
+    else return ()
 
 
 -- When hitting a call
@@ -846,8 +873,8 @@ graphicsTranslator ((SetXY a b):rest) = do
 --testString = "(define foo '((to testsub (a b) (setxy (+ a 1) (+ b 1)) (setxy (+ a 1) (+ a 1)) (setxy (+ b 1) (+ b 1)))(testsub 0 3)   ))"
 
 --testString = "(define foo '((setxy 1 4) (setxy 1 1) (setxy 4 4)))"
-testString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
---testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
+--estString = "(define broccoli'((to broccoli (x y)    (penup)    (left 90)    (forward 50)    (right 90)    (pendown)    (broccoli1 x y)  )  (to broccoli1 (x y)    (if (< x y)      (stop)      ((square x)       (forward x)       (left 45)       (broccoli1 (/ x (sqrt 2)) y)       (penup)       (backward (/ x (sqrt 2)))       (left 45)       (pendown)       (backward x)      )    )  )  (to square (x)    (repeat 4      (forward x)      (right 90)    )  )  (broccoli 100 1)))"
+testString = "(define fancy-spiral'((to fancy-spiral (size angle)(if (> size 200)(stop))(color (* size (/ 360 200)))(forward size)(right angle)(fancy-spiral (+ size 1) angle))(penup)(forward 120)(pendown)(fancy-spiral 0 91)))"
 --testString = "(define foo '((to circle (h r)   (repeat 90     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))   )  ) (penup) (setxy 50 50) (pendown) (circle 0 0))))"
 --testString = "(define lissajous '((to lissajous (a b c t)(penup)(setxy (* (cos c) 75) 100)(pendown)(repeat 364 (color t)(setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100))(make t (+ t 1))))(lissajous 0.1396 -0.12215 0.2094 0)))"
 -- testString = "(define foo '((to circle (h r)   (repeat 12     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4)) (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))     (color h)     (make r (* (/ h 360) (* 2 3.1416)))     (setxy (* (cos r) 50) (+ (* (sin r) 50) 50))     (make h (+ h 4))  )  ) (penup) (setxy 50 50) (pendown) (circle 0 0))))"
