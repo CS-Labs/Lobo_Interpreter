@@ -22,6 +22,7 @@ import Control.Monad.Trans hiding (join)
 --        Lobo Interpeter
 --
 
+-- Plumbing Graphics Code Written by Lance Williams.
 
 --------------------------------------------------------
 ----
