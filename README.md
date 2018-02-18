@@ -48,16 +48,52 @@ using foldr1. After that the graphics instruction is send to Lance Williams rend
 
 **Examples:**
 
+```lisp
+(define lissajous'
+((to lissajous (a b c t)
+  (penup)
+  (setxy (* (cos c) 75) 100)
+  (pendown)
+  (repeat 364 
+    (color t)
+    (setxy (* (cos (+ (* t a) c)) 75) (+ (* (sin (* t b)) 75) 100))
+    (make t (+ t 1))))
+(lissajous 0.1396 -0.12215 0.2094 0)))"
+```
 
+```lisp
+(define hilbert'
+((to hilbert (size level parity)
+(if (> level 0)
+  ((left (* parity 90))
+  (hilbert size (- level 1) (- parity))
+  (forward size)
+  (right (* parity 90))
+  (hilbert size (- level 1) parity)
+  (forward size)
+  (hilbert size (- level 1) parity)
+  (right (* parity 90))
+  (forward size)
+  (hilbert size (- level 1) (- parity))
+  (left (* parity 90)))))
+(hilbert 10 4 1)))"
+```
 
-
-
-
-
-
-
-
-
+```lisp
+(define tree'
+((to tree (depth count)
+  (forward (* depth 20))
+  (right 90)
+  (if (> depth 1)
+    (repeat 5 
+      (push)
+      (left (* count 30))
+      (color (* 60 count)) 
+  (tree (- depth 1) 1)
+  (pop)
+  (make count (+ count 1)))))
+(tree 4 1)))"
+```
 
 
 
