@@ -60,6 +60,7 @@ using foldr1. After that the graphics instruction is send to Lance Williams rend
     (make t (+ t 1))))
 (lissajous 0.1396 -0.12215 0.2094 0)))"
 ```
+![lissajous](https://github.com/CS-Labs/Web-rary/blob/master/img/lissajous.PNG "lissajous")
 
 ```lisp
 (define hilbert'
@@ -78,6 +79,7 @@ using foldr1. After that the graphics instruction is send to Lance Williams rend
   (left (* parity 90)))))
 (hilbert 10 4 1)))"
 ```
+![hilbert](https://github.com/CS-Labs/Web-rary/blob/master/img/hilbert.PNG "hilbert")
 
 ```lisp
 (define tree'
@@ -94,6 +96,8 @@ using foldr1. After that the graphics instruction is send to Lance Williams rend
   (make count (+ count 1)))))
 (tree 4 1)))"
 ```
+
+![tree](https://github.com/CS-Labs/Web-rary/blob/master/img/tree.PNG "tree")
 
 
 
