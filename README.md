@@ -29,13 +29,10 @@ stream are defined in our custom data type, Instruction.
 Next using the instruction stream and jump table constructed in the previous step, a stream of basic graphics instructions is produced.
 There are only four different graphics instructions produced during this phase of compilation:
 
-Straight GLfloat  (Line of GLfloat in length)
-
-Invisible GLfloat (Invisible line of GLfloat in length)
-
-Bend GLfloat (Change the angle pen is facing)
-
-Paint Colour Graphic (Change the color of pen)
+Straight GLfloat  (Line of GLfloat in length)  
+Invisible GLfloat (Invisible line of GLfloat in length)  
+Bend GLfloat (Change the angle pen is facing)  
+Paint Colour Graphic (Change the color of pen)  
 
 
 All variable resolution is done at this stage in addition to function, arithmetic, and conditional evaluations.
@@ -60,7 +57,7 @@ using foldr1. After that the graphics instruction is send to Lance Williams rend
     (make t (+ t 1))))
 (lissajous 0.1396 -0.12215 0.2094 0)))"
 ```
-![lissajous](https://github.com/CS-Labs/Web-rary/blob/master/img/lissajous.PNG "lissajous")
+![lissajous](https://github.com/CS-Labs/Lobo_Interpreter/blob/master/img/lissajous.PNG "lissajous")
 
 ```lisp
 (define hilbert'
@@ -79,7 +76,7 @@ using foldr1. After that the graphics instruction is send to Lance Williams rend
   (left (* parity 90)))))
 (hilbert 10 4 1)))"
 ```
-![hilbert](https://github.com/CS-Labs/Web-rary/blob/master/img/hilbert.PNG "hilbert")
+![hilbert](https://github.com/CS-Labs/Lobo_Interpreter/blob/master/img/hilbert.PNG "hilbert")
 
 ```lisp
 (define tree'
@@ -97,7 +94,7 @@ using foldr1. After that the graphics instruction is send to Lance Williams rend
 (tree 4 1)))"
 ```
 
-![tree](https://github.com/CS-Labs/Web-rary/blob/master/img/tree.PNG "tree")
+![tree](https://github.com/CS-Labs/Lobo_Interpreter/blob/master/img/tree.PNG "tree")
 
 
 
