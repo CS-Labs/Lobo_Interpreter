@@ -30,9 +30,13 @@ Next using the instruction stream and jump table constructed in the previous ste
 There are only four different graphics instructions produced during this phase of compilation:
 
 Straight GLfloat  (Line of GLfloat in length)
+
 Invisible GLfloat (Invisible line of GLfloat in length)
+
 Bend GLfloat (Change the angle pen is facing)
+
 Paint Colour Graphic (Change the color of pen)
+
 
 All variable resolution is done at this stage in addition to function, arithmetic, and conditional evaluations.
 
